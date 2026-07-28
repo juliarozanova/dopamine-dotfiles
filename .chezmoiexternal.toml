@@ -1,4 +1,5 @@
-# Files chezmoi fetches for you on `chezmoi apply` (needs network).
+# Files chezmoi fetches for you on `chezmoi apply` (runs on YOUR machine
+# with real network — these URLs work there even where my fetcher can't go).
 
 # zjstatus — the themeable status bar plugin used by both layouts
 [".config/zellij/plugins/zjstatus.wasm"]
@@ -7,19 +8,21 @@
     refreshPeriod = "168h"
 
 # ══════════════════════════════════════════════════════════════════
-#  YOUR OLD DOTFILES — wire in once you fill in <user>/<old-repo>.
-#  Option A: adopt your whole nvim config from the old repo:
+#  dopamine.nvim — your colorscheme (juliarozanova/dopamine.nvim).
+#  Preferred install is via your nvim plugin manager (lazy spec in
+#  README). If you'd rather have chezmoi vendor the whole plugin so a
+#  fresh machine has it before lazy's first sync, uncomment:
 #
-# [".config/nvim"]
+# [".local/share/dopamine.nvim"]
 #     type = "git-repo"
-#     url = "https://github.com/<user>/<old-repo>.git"
+#     url = "https://github.com/juliarozanova/dopamine.nvim.git"
 #     refreshPeriod = "168h"
-#     # if nvim lives in a subdir of the old repo, prefer type="archive"
-#     # with stripComponents + include filters — see README §"Old schemes".
 #
-#  Option B (surgical): pull just the colour scheme files:
+#  …and point lazy at it with:  { dir = "~/.local/share/dopamine.nvim" }
 #
-# [".config/nvim/colors/yourscheme.lua"]
-#     type = "file"
-#     url = "https://raw.githubusercontent.com/<user>/<old-repo>/main/nvim/colors/yourscheme.lua"
+#  Reference copy of the palette source, kept fresh for eyeballing:
+[".config/zellij/themes/dopamine-colors-reference.lua"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/juliarozanova/dopamine.nvim/master/lua/dopamine/colors.lua"
+    refreshPeriod = "168h"
 # ══════════════════════════════════════════════════════════════════

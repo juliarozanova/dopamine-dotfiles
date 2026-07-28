@@ -98,19 +98,30 @@ paper https://arxiv.org/abs/2410.20672
 Everything — papers, ticket learnings, HDL practices — is one grep/telescope
 surface.
 
-## Retheming 🎨
+## The scheme 🎨 — dopamine.nvim, everywhere
 
-All colours live in **`.chezmoidata/palette.toml`**. Swap the hex values for
-your scheme, run `chezmoi apply`, and the zellij theme + both status bars
-re-render. (Shipped palette is a placeholder.)
+All colours live in **`.chezmoidata/palette.toml`** — edit → `chezmoi apply`
+→ the zellij theme + both status bars re-render. It ships pre-filled with
+the **ayu-dark base** that
+[dopamine.nvim](https://github.com/juliarozanova/dopamine.nvim) reimplements
+(mirage variant included, commented — swap the block to switch). If your
+`colors.lua` diverges from stock ayu anywhere, correct those hexes.
 
-## Old schemes (TODO — one edit)
+**nvim** — keep installing the scheme through your plugin manager:
 
-`.chezmoiexternal.toml` has commented slots to pull your nvim config /
-colour schemes straight from your previous dotfiles repo — fill in
-`<user>/<old-repo>` and the paths, `chezmoi apply`, done. Your terminal
-emulator scheme (Windows Terminal / WezTerm / Alacritty / kitty) can be
-managed the same way once you decide which file it lives in.
+```lua
+-- lazy.nvim
+{ "juliarozanova/dopamine.nvim",
+  lazy = false, priority = 1000,
+  config = function() vim.cmd.colorscheme("dopamine") end },
+-- lualine: require('lualine').setup({ options = { theme = 'dopamine' } })
+```
+
+`chezmoi apply` also drops a fresh reference copy of your `colors.lua` at
+`~/.config/zellij/themes/dopamine-colors-reference.lua` so the exact hexes
+are always one `:e` away when tweaking the palette. Your terminal emulator
+scheme (Windows Terminal / WezTerm / kitty) can join via another
+`.chezmoiexternal.toml` entry once you pick where that file lives.
 
 ## Anatomy
 

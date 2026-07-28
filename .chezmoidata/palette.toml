@@ -1,20 +1,38 @@
 # ══════════════════════════════════════════════════════════════════
 #  THE dopamine palette — single source of truth for all colours.
-#  ➜ SWAP THESE HEX VALUES for your own scheme, then: chezmoi apply
-#  (zellij theme + status bar re-render from this file)
-#  Shipped default is a placeholder (Catppuccin-Mocha-ish) so the
-#  repo works out of the box.
+#  Edit here → `chezmoi apply` → zellij theme + status bars re-render.
+#
+#  Values below are the ayu-dark base your dopamine.nvim reimplements
+#  (github.com/juliarozanova/dopamine.nvim ← Luxed/ayu-vim lineage).
+#  If your colors.lua diverges from stock ayu, correct them here.
+#  Slot mapping: mauve = ayu accent (session badge pop),
+#                pink  = constant violet (active tab).
+#  Mirage variant kept below, commented, for a one-swap switch.
 # ══════════════════════════════════════════════════════════════════
 [palette]
-bg      = "#1e1e2e"
-surface = "#313244"
-overlay = "#6c7086"
-fg      = "#cdd6f4"
-pink    = "#f5c2e7"
-mauve   = "#cba6f7"
-red     = "#f38ba8"
-peach   = "#fab387"
-yellow  = "#f9e2af"
-green   = "#a6e3a1"
-teal    = "#94e2d5"
-blue    = "#89b4fa"
+bg      = "#0B0E14"
+surface = "#11151C"
+overlay = "#565B66"
+fg      = "#BFBDB6"
+pink    = "#D2A6FF"
+mauve   = "#E6B450"
+red     = "#D95757"
+peach   = "#FF8F40"
+yellow  = "#FFB454"
+green   = "#AAD94C"
+teal    = "#95E6CB"
+blue    = "#59C2FF"
+
+# -- dopamine-mirage variant --------------------------------------
+# bg      = "#1F2430"
+# surface = "#242936"
+# overlay = "#707A8C"
+# fg      = "#CCCAC2"
+# pink    = "#DFBFFF"
+# mauve   = "#FFCC66"
+# red     = "#FF6666"
+# peach   = "#FFAD66"
+# yellow  = "#FFD173"
+# green   = "#D5FF80"
+# teal    = "#95E6CB"
+# blue    = "#73D0FF"
