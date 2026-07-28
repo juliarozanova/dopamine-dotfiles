@@ -1,0 +1,20 @@
+# ══════════════════════════════════════════════════════════════════
+#  THE dopamine palette — single source of truth for all colours.
+#  ➜ SWAP THESE HEX VALUES for your own scheme, then: chezmoi apply
+#  (zellij theme + status bar re-render from this file)
+#  Shipped default is a placeholder (Catppuccin-Mocha-ish) so the
+#  repo works out of the box.
+# ══════════════════════════════════════════════════════════════════
+[palette]
+bg      = "#1e1e2e"
+surface = "#313244"
+overlay = "#6c7086"
+fg      = "#cdd6f4"
+pink    = "#f5c2e7"
+mauve   = "#cba6f7"
+red     = "#f38ba8"
+peach   = "#fab387"
+yellow  = "#f9e2af"
+green   = "#a6e3a1"
+teal    = "#94e2d5"
+blue    = "#89b4fa"

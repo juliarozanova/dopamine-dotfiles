@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Installed per-repo by tk. Prefixes commit messages with the Jira key
+# taken from the branch name (FRD-123-some-slug → "FRD-123: <msg>").
+# Jira's GitHub integration then links every commit to the ticket for free.
+msgfile="$1"; source="${2:-}"
+case "$source" in merge|squash) exit 0;; esac
+
+branch="$(git symbolic-ref -q --short HEAD || true)"
+tid="$(printf '%s' "$branch" | grep -oE '^[A-Za-z][A-Za-z0-9]*-[0-9]+' | tr '[:lower:]' '[:upper:]' || true)"
+[[ -z "$tid" ]] && exit 0
+grep -q "$tid" "$msgfile" && exit 0
+
+tmp="$(mktemp)"
+printf '%s: ' "$tid" > "$tmp"
+cat "$msgfile" >> "$tmp"
+mv "$tmp" "$msgfile"

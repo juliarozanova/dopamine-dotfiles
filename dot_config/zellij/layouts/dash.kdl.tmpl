@@ -1,0 +1,43 @@
+// dash — home base. Plain `zellij` lands here (default_layout).
+// Left stack: PRs + sprint. Right stack: knowledge inbox + files + shell.
+layout {
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="file:{{ .chezmoi.homeDir }}/.config/zellij/plugins/zjstatus.wasm" {
+                format_left   "#[bg={{ .palette.pink }},fg={{ .palette.bg }},bold] ⌂ dash #[bg={{ .palette.surface }}]{mode}"
+                format_center "{tabs}"
+                format_right  "#[fg={{ .palette.overlay }}]{datetime}"
+                format_space  ""
+                mode_normal  "#[bg={{ .palette.surface }},fg={{ .palette.green }}] ● "
+                mode_locked  "#[bg={{ .palette.surface }},fg={{ .palette.red }}] ⊘ "
+                mode_default_to_mode "normal"
+                tab_normal   "#[fg={{ .palette.overlay }}] {name} "
+                tab_active   "#[fg={{ .palette.pink }},bold] {name} "
+                datetime          "{format}"
+                datetime_format   "%a %d %b · %H:%M"
+                datetime_timezone "Europe/London"
+            }
+        }
+        children
+    }
+
+    tab name="dash" cwd="{{ .chezmoi.homeDir }}/Dashboard" focus=true {
+        pane split_direction="vertical" {
+            pane size="55%" stacked=true {
+                pane name="⇅ pull requests" command="gh" expanded=true {
+                    args "dash"
+                }
+                pane name="◷ sprint" command="bash" {
+                    args "-lc" "jira sprint list --current --plain 2>/dev/null | less -R"
+                }
+            }
+            pane stacked=true {
+                pane name="⚑ hdl inbox" command="nvim" expanded=true {
+                    args "Knowledge/hdl/inbox.md"
+                }
+                pane name="🗀 files" command="yazi"
+                pane name="❯ shell"
+            }
+        }
+    }
+}

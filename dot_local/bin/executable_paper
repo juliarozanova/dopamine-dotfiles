@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# paper — capture an arXiv paper into the knowledge vault
+#   paper https://arxiv.org/abs/2410.20672     or:  paper 2410.20672
+# Creates Knowledge/papers/<year>-<firstauthor>-<slug>.md + downloads the PDF.
+set -euo pipefail
+
+DASH="${DASHBOARD:-$HOME/Dashboard}"
+P="$DASH/Knowledge/papers"
+mkdir -p "$P/pdf"
+
+[[ $# -ge 1 ]] || { echo "usage: paper <arxiv-url-or-id>"; exit 1; }
+id="$(printf '%s' "$1" | grep -oE '[0-9]{4}\.[0-9]{4,5}(v[0-9]+)?' | head -1)"
+[[ -n "$id" ]] || { echo "paper: no arXiv id found in '$1'"; exit 1; }
+
+meta="$(python3 - "$id" <<'PY'
+import sys, re, urllib.request, xml.etree.ElementTree as ET
+aid = sys.argv[1]
+ns = {'a': 'http://www.w3.org/2005/Atom'}
+xml = urllib.request.urlopen(
+    f'https://export.arxiv.org/api/query?id_list={aid}', timeout=20).read()
+e = ET.fromstring(xml).find('a:entry', ns)
+clean = lambda s: re.sub(r'\s+', ' ', s).strip()
+print(clean(e.find('a:title', ns).text))
+print(e.find('a:published', ns).text[:4])
+print(', '.join(a.find('a:name', ns).text for a in e.findall('a:author', ns)[:8]))
+print(clean(e.find('a:summary', ns).text))
+PY
+)"
+
+title="$(sed -n 1p <<<"$meta")"
+year="$(sed -n 2p <<<"$meta")"
+authors="$(sed -n 3p <<<"$meta")"
+abstract="$(sed -n 4p <<<"$meta")"
+first="$(awk -F', ' '{print $1}' <<<"$authors" | awk '{print $NF}' | tr '[:upper:]' '[:lower:]')"
+slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]' '-' \
+        | sed 's/^-*//; s/-*$//' | cut -c1-50 | sed 's/-*$//')"
+note="$P/$year-$first-$slug.md"
+
+curl -fsSL "https://arxiv.org/pdf/$id" -o "$P/pdf/$id.pdf" \
+  || echo "paper: PDF download failed (note still created)"
+
+if [[ ! -f "$note" ]]; then
+  cat > "$note" <<EOF
+---
+title: "$title"
+authors: "$authors"
+year: $year
+arxiv: "$id"
+pdf: pdf/$id.pdf
+tags: [paper]
+---
+
+## TL;DR
+
+
+## Why I read it
+
+
+## Abstract
+
+$abstract
+
+## Notes
+
+
+## Relevance to my work (tag #hdl if framework-applicable)
+
+EOF
+fi
+
+echo "$note"
+[[ -n "${EDITOR:-}" ]] && exec $EDITOR "$note" || true

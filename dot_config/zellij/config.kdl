@@ -1,0 +1,19 @@
+// dopamine-dotfiles zellij config
+// keybinds are stock zellij (your muscle memory survives);
+// stacked panes: Alt-[ / Alt-] cycle swap layouts, Ctrl-p + arrows as usual.
+
+theme "dopamine"
+default_layout "dash"          // plain `zellij` = your dashboard home session
+pane_frames false              // clean look; zjstatus carries the state
+scrollback_editor "nvim"       // Ctrl-s e → scrollback in nvim, vim motions on output
+copy_on_select true
+mouse_mode true
+session_serialization true     // half-finished tickets survive reboots
+styled_underlines true
+
+ui {
+    pane_frames {
+        rounded_corners true
+        hide_session_name false
+    }
+}

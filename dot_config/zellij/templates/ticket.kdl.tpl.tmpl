@@ -1,0 +1,56 @@
+// ticket layout template — rendered twice:
+//   1. chezmoi apply bakes in your palette + home dir  → ~/.config/zellij/templates/ticket.kdl.tpl
+//   2. tk substitutes ${TICKET} and ${WORKTREE} at runtime (envsubst)
+layout {
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="file:{{ .chezmoi.homeDir }}/.config/zellij/plugins/zjstatus.wasm" {
+                format_left   "#[bg={{ .palette.mauve }},fg={{ .palette.bg }},bold] {session} #[bg={{ .palette.surface }}]{mode}"
+                format_center "{tabs}"
+                format_right  "#[fg={{ .palette.teal }}]{command_branch}  #[fg={{ .palette.overlay }}]{datetime}"
+                format_space  ""
+
+                mode_normal  "#[bg={{ .palette.surface }},fg={{ .palette.green }}] ● "
+                mode_locked  "#[bg={{ .palette.surface }},fg={{ .palette.red }}] ⊘ "
+                mode_pane    "#[bg={{ .palette.surface }},fg={{ .palette.blue }}] PANE "
+                mode_tab     "#[bg={{ .palette.surface }},fg={{ .palette.yellow }}] TAB "
+                mode_resize  "#[bg={{ .palette.surface }},fg={{ .palette.peach }}] RESIZE "
+                mode_scroll  "#[bg={{ .palette.surface }},fg={{ .palette.pink }}] SCROLL "
+                mode_default_to_mode "normal"
+
+                tab_normal   "#[fg={{ .palette.overlay }}] {name} "
+                tab_active   "#[fg={{ .palette.pink }},bold] {name} "
+
+                command_branch_command  "git rev-parse --abbrev-ref HEAD"
+                command_branch_format   " {stdout}"
+                command_branch_interval "10"
+                command_branch_rendermode "static"
+
+                datetime          "{format}"
+                datetime_format   "%H:%M"
+                datetime_timezone "Europe/London"
+            }
+        }
+        children
+    }
+
+    tab name="${TICKET}" cwd="${WORKTREE}" focus=true {
+        pane split_direction="vertical" {
+            // ── main stage: nvim, opened on the ticket ──────────────
+            pane size="62%" name="nvim" command="nvim" {
+                args "TICKET.md"
+            }
+            // ── the stack: expand what you need, rest fold to titles ─
+            pane size="38%" stacked=true {
+                pane name="✳ claude" command="bash" {
+                    args "-lc" "claude --continue 2>/dev/null || claude"
+                }
+                pane name="⎇ lazygit" command="lazygit" expanded=true
+                pane name="◫ ticket" command="bash" {
+                    args "-lc" "jira issue view ${TICKET} --comments 10 | less -R"
+                }
+                pane name="❯ shell"
+            }
+        }
+    }
+}

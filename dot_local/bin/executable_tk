@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# tk — ticket kit
+# one Jira ticket = one git worktree = one zellij session = one Claude context
+#
+#   tk              fzf-pick one of your open tickets, then open it
+#   tk FRD-123      open (create if needed) worktree + zellij session for a ticket
+#   tk done [KEY]   summarise work via Claude, post as Jira comment, log learnings
+#   tk refresh      re-pull ticket text + comments into TICKET.md
+#   tk ls           list ticket worktrees
+#   tk doctor       check dependencies
+set -euo pipefail
+
+DASH="${DASHBOARD:-$HOME/Dashboard}"
+CODE="$DASH/Code"
+WORK="$DASH/Work"
+KNOW="$DASH/Knowledge"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/tk"
+MAP="$STATE/repo.map"                                  # "TICKET /path/to/repo" per line
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/tk/repos.conf" # "PREFIX /path/to/repo" per line
+SHARE="$HOME/.local/share/tk"
+TPL="${XDG_CONFIG_HOME:-$HOME/.config}/zellij/templates/ticket.kdl.tpl"
+
+mkdir -p "$STATE" "$WORK" "$KNOW/tickets" "$KNOW/hdl"
+
+die()  { printf 'tk: %s\n' "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1 (try: tk doctor)"; }
+
+# ---------------------------------------------------------------- helpers ----
+
+pick_ticket() {
+  need jira; need fzf
+  jira issue list -a"$(jira me)" --plain --columns key,status,summary 2>/dev/null \
+    | fzf --header-lines=1 --prompt='ticket> ' --height=60% --reverse \
+    | awk '{print $1}'
+}
+
+summary_of() {
+  jira issue view "$1" --raw 2>/dev/null | jq -r '.fields.summary // empty'
+}
+
+slugify() {
+  tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]' '-' \
+    | sed 's/^-*//; s/-*$//' | cut -c1-40 | sed 's/-*$//'
+}
+
+repo_for() {
+  local t="$1" hit pfx
+  # 1) previously chosen for this exact ticket
+  hit=$(awk -v t="$t" '$1==t {print $2}' "$MAP" 2>/dev/null | tail -1)
+  [[ -n "$hit" && -d "$hit" ]] && { echo "$hit"; return; }
+  # 2) default for the Jira project prefix (repos.conf)
+  pfx="${t%%-*}"
+  hit=$(awk -v p="$pfx" '$1==p {print $2}' "$CONF" 2>/dev/null | tail -1)
+  hit="${hit/#\~/$HOME}"
+  [[ -n "$hit" && -d "$hit" ]] && { echo "$hit"; return; }
+  # 3) ask, once, and remember
+  need fzf
+  hit=$(find "$CODE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+    | fzf --prompt="repo for $t> " --height=40% --reverse) || true
+  [[ -n "$hit" ]] || die "no repo chosen (put checkouts in $CODE, or map prefixes in $CONF)"
+  echo "$hit"
+}
+
+install_hook() {
+  local repo="$1" hooks
+  hooks="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/hooks"
+  [[ -d "$hooks" ]] || return 0
+  if [[ ! -f "$hooks/prepare-commit-msg" ]]; then
+    install -m 0755 "$SHARE/prepare-commit-msg" "$hooks/prepare-commit-msg"
+    echo "tk: installed ticket-prefix commit hook in $(basename "$repo")"
+  fi
+}
+
+write_ticket_context() {
+  local t="$1" sum="$2" wt="$3"
+  jira issue view "$t" --comments 10 --plain > "$wt/TICKET.md" 2>/dev/null \
+    || echo "# $t — $sum (jira fetch failed; run: tk refresh)" > "$wt/TICKET.md"
+  if [[ ! -f "$wt/CLAUDE.local.md" ]]; then
+    cat > "$wt/CLAUDE.local.md" <<EOF
+# Context: $t
+
+We are working on Jira ticket **$t**: $sum
+
+- Ticket description and comments: @TICKET.md
+- HDL best practices live at: $KNOW/hdl/best-practices.md — follow them, and
+  flag when we discover something that should be added.
+- When we finish something notable, state it as a one-line learning.
+  Tag HDL-framework insights with #hdl so they get harvested by \`tk done\`.
+EOF
+  fi
+  # keep tk's context files out of accidental commits
+  grep -qxF 'TICKET.md' "$wt/.git/info/exclude" 2>/dev/null || {
+    local excl; excl="$(git -C "$wt" rev-parse --git-path info/exclude 2>/dev/null)"
+    [[ -n "$excl" ]] && printf 'TICKET.md\nCLAUDE.local.md\n' >> "$excl"
+  }
+}
+
+ticket_from_cwd() {
+  basename "$PWD" | grep -oE '^[A-Za-z][A-Za-z0-9]*-[0-9]+' | tr '[:lower:]' '[:upper:]' || true
+}
+
+# ------------------------------------------------------------- subcommands ---
+
+cmd_open() {
+  local t="${1:-}"
+  [[ -z "$t" ]] && t="$(pick_ticket)"
+  [[ -n "$t" ]] || die "no ticket selected"
+  t="$(printf '%s' "$t" | tr '[:lower:]' '[:upper:]')"
+  need git; need jq; need zellij; need envsubst
+
+  local sum slug branch wt repo
+  sum="$(summary_of "$t")"
+  [[ -n "$sum" ]] || die "cannot read $t from Jira — is jira-cli configured? (jira init)"
+  slug="$(printf '%s' "$sum" | slugify)"
+  branch="$t-$slug"
+  wt="$WORK/$branch"
+  repo="$(repo_for "$t")"
+  grep -q "^$t " "$MAP" 2>/dev/null || echo "$t $repo" >> "$MAP"
+
+  if [[ ! -d "$wt" ]]; then
+    git -C "$repo" worktree add "$wt" -b "$branch" 2>/dev/null \
+      || git -C "$repo" worktree add "$wt" "$branch" \
+      || die "could not create worktree for $branch in $repo"
+    echo "tk: worktree $wt"
+  fi
+  install_hook "$repo"
+  write_ticket_context "$t" "$sum" "$wt"
+
+  [[ -f "$TPL" ]] || die "layout template missing: $TPL"
+  local rendered="/tmp/zj-$t.kdl"
+  TICKET="$t" WORKTREE="$wt" envsubst '${TICKET} ${WORKTREE}' < "$TPL" > "$rendered"
+
+  if [[ -n "${ZELLIJ:-}" ]]; then
+    # already inside zellij → open the ticket as a new tab in this session
+    zellij action new-tab --layout "$rendered" --name "$t"
+  elif zellij list-sessions -s 2>/dev/null | grep -qx "$t"; then
+    exec zellij attach "$t"
+  else
+    exec zellij --session "$t" --layout "$rendered"
+  fi
+}
+
+cmd_done() {
+  local t="${1:-${TICKET:-}}"
+  [[ -z "$t" ]] && t="$(ticket_from_cwd)"
+  [[ -n "$t" ]] || die "which ticket? run inside a worktree or: tk done FRD-123"
+  need git; need jira; need claude
+
+  local base
+  base="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
+  base="${base:-main}"
+  git rev-parse -q --verify "$base" >/dev/null 2>&1 || base=master
+
+  local work
+  work="$(git log --oneline "$base"..HEAD 2>/dev/null; echo; git diff --stat "$base"..HEAD 2>/dev/null)"
+  [[ -n "${work//[[:space:]]/}" ]] || die "no commits on top of $base yet"
+
+  echo "tk: asking Claude for a summary…"
+  local summary
+  summary="$(printf '%s\n' "$work" | claude -p "$(cat "$SHARE/summary-prompt.md")")"
+
+  printf '\n━━ proposed Jira comment for %s ━━━━━━━━━━━━━━━\n%s\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' "$t" "$summary"
+  read -rp "post to Jira? [y/N] " ok
+  if [[ "$ok" == [yY]* ]]; then
+    jira issue comment add "$t" "$summary" && echo "tk: posted to $t"
+  fi
+
+  { printf '\n## %s\n\n%s\n' "$(date +%F)" "$summary"; } >> "$KNOW/tickets/$t.md"
+  printf '%s\n' "$summary" | grep -i '#hdl' >> "$KNOW/hdl/inbox.md" || true
+  echo "tk: logged → Knowledge/tickets/$t.md  (#hdl lines → Knowledge/hdl/inbox.md)"
+}
+
+cmd_refresh() {
+  local t; t="$(ticket_from_cwd)"
+  [[ -n "$t" ]] || die "run inside a ticket worktree"
+  need jira
+  jira issue view "$t" --comments 10 --plain > "$PWD/TICKET.md"
+  echo "tk: refreshed TICKET.md for $t"
+}
+
+cmd_ls() {
+  find "$WORK" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+}
+
+cmd_doctor() {
+  local d ok=1
+  for d in git jira jq fzf zellij nvim lazygit claude envsubst glow yazi; do
+    if command -v "$d" >/dev/null 2>&1; then printf '  ✓ %s\n' "$d"
+    else printf '  ✗ %s\n' "$d"; ok=0; fi
+  done
+  [[ -f "$TPL" ]] && printf '  ✓ layout template\n' || { printf '  ✗ layout template (%s)\n' "$TPL"; ok=0; }
+  [[ $ok -eq 1 ]] && echo "all good ✨" || echo "install the ✗ ones (see README)"
+}
+
+case "${1:-}" in
+  done)    shift; cmd_done "$@";;
+  refresh) cmd_refresh;;
+  ls)      cmd_ls;;
+  doctor)  cmd_doctor;;
+  -h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//';;
+  "")      cmd_open;;
+  *)       cmd_open "$1";;
+esac
