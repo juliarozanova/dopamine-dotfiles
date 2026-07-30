@@ -101,11 +101,13 @@ surface.
 ## The scheme 🎨 — dopamine.nvim, everywhere
 
 All colours live in **`.chezmoidata/palette.toml`** — edit → `chezmoi apply`
-→ the zellij theme + both status bars re-render. It ships pre-filled with
-the **ayu-dark base** that
-[dopamine.nvim](https://github.com/juliarozanova/dopamine.nvim) reimplements
-(mirage variant included, commented — swap the block to switch). If your
-`colors.lua` diverges from stock ayu anywhere, correct those hexes.
+→ the zellij theme + both status bars re-render. It's ported straight from
+[dopamine.nvim](https://github.com/juliarozanova/dopamine.nvim)'s
+`colors.lua`: the **dark** variant is active, with **mirage** and **light**
+as commented blocks below it — swap a block, apply, done. Notable mapping:
+session badge = copper accent, active tab = raspberry, and ANSI blue is
+your slate keyword colour so blue-hungry TUIs (lazygit branches, fzf
+pointers) stay in-vibe instead of shouting cyan.
 
 **nvim** — keep installing the scheme through your plugin manager:
 

@@ -2,37 +2,51 @@
 #  THE dopamine palette — single source of truth for all colours.
 #  Edit here → `chezmoi apply` → zellij theme + status bars re-render.
 #
-#  Values below are the ayu-dark base your dopamine.nvim reimplements
-#  (github.com/juliarozanova/dopamine.nvim ← Luxed/ayu-vim lineage).
-#  If your colors.lua diverges from stock ayu, correct them here.
-#  Slot mapping: mauve = ayu accent (session badge pop),
-#                pink  = constant violet (active tab).
-#  Mirage variant kept below, commented, for a one-swap switch.
+#  Ported from dopamine.nvim/lua/dopamine/colors.lua (dark variant
+#  active; mirage + light commented below — swap a block to switch).
+#  Slot mapping: mauve = accent  (copper — session badge)
+#                pink  = constant (raspberry — active tab)
+#                blue  = keyword  (slate: the scheme runs blue-less,
+#                        so ANSI blue stays in-vibe for lazygit etc.)
 # ══════════════════════════════════════════════════════════════════
 [palette]
-bg      = "#0B0E14"
-surface = "#11151C"
-overlay = "#565B66"
-fg      = "#BFBDB6"
-pink    = "#D2A6FF"
-mauve   = "#E6B450"
-red     = "#D95757"
-peach   = "#FF8F40"
-yellow  = "#FFB454"
-green   = "#AAD94C"
-teal    = "#95E6CB"
-blue    = "#59C2FF"
+bg      = "#2B343D"   # bg
+surface = "#323B44"   # panel_bg
+overlay = "#8A9299"   # ui / fg_idle
+fg      = "#D7DBDF"   # fg
+pink    = "#CC5E87"   # constant — raspberry
+mauve   = "#E6A46A"   # accent — warm copper
+red     = "#E05260"   # error
+peach   = "#CC8052"   # markup — terracotta
+yellow  = "#E6BA7E"   # special — sand
+green   = "#C4D27A"   # func / vcs_added — olive
+teal    = "#5CC1AE"   # tag / entity
+blue    = "#75859C"   # keyword — slate
 
-# -- dopamine-mirage variant --------------------------------------
+# -- dopamine-mirage ----------------------------------------------
 # bg      = "#1F2430"
-# surface = "#242936"
+# surface = "#1C212B"
 # overlay = "#707A8C"
 # fg      = "#CCCAC2"
 # pink    = "#DFBFFF"
 # mauve   = "#FFCC66"
 # red     = "#FF6666"
 # peach   = "#FFAD66"
-# yellow  = "#FFD173"
-# green   = "#D5FF80"
+# yellow  = "#FFDFB3"
+# green   = "#87D96C"
 # teal    = "#95E6CB"
 # blue    = "#73D0FF"
+
+# -- dopamine-light -----------------------------------------------
+# bg      = "#F8F9FA"
+# surface = "#F3F4F5"
+# overlay = "#8A9199"
+# fg      = "#5C6166"
+# pink    = "#DB5E8C"
+# mauve   = "#CC8052"
+# red     = "#E65050"
+# peach   = "#C25234"
+# yellow  = "#E6BA7E"
+# green   = "#AEBA5A"
+# teal    = "#60AB96"
+# blue    = "#8A9199"
