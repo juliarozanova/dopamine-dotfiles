@@ -18,16 +18,17 @@ keybinds {
 
 theme "dopamine"
 default_layout "dash"          // plain `zellij` = your dashboard home session
-pane_frames false              // clean look; zjstatus carries the state
+pane_frames true               // the little outline around each pane
 scrollback_editor "nvim"       // Ctrl-s e → scrollback in nvim, vim motions on output
 copy_on_select true
 mouse_mode true
 session_serialization true     // half-finished tickets survive reboots
 styled_underlines true
+show_startup_tips false        // no "Learn how to organise your desktop" popup
 
 ui {
     pane_frames {
-        rounded_corners true
+        rounded_corners false
         hide_session_name false
     }
 }
