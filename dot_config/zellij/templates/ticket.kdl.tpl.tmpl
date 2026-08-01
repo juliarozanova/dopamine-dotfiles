@@ -18,8 +18,8 @@ layout {
                 mode_scroll  "#[bg={{ .palette.surface }},fg={{ .palette.pink }}] SCROLL "
                 mode_default_to_mode "normal"
 
-                tab_normal   "#[fg={{ .palette.overlay }}] {name} "
-                tab_active   "#[fg={{ .palette.pink }},bold] {name} "
+                tab_normal   "#[fg={{ .palette.overlay }},bg={{ .palette.surface }}] {name} #[bg={{ .palette.bg }}] "
+                tab_active   "#[fg={{ .palette.bg }},bg={{ .palette.pink }},bold] {name} #[bg={{ .palette.bg }}] "
 
                 command_branch_command  "git rev-parse --abbrev-ref HEAD"
                 command_branch_format   " {stdout}"
