@@ -2,6 +2,20 @@
 // keybinds are stock zellij (your muscle memory survives);
 // stacked panes: Alt-[ / Alt-] cycle swap layouts, Ctrl-p + arrows as usual.
 
+// Ctrl-h is zellij's default "move" mode trigger, which steals it from nvim
+// (Ctrl-j/k/l are never bound by zellij). Free it, park move mode on Alt-m,
+// and make Alt-hjkl the within-zellij focus movement.
+keybinds {
+    shared_except "locked" {
+        unbind "Ctrl h"
+        bind "Alt m" { SwitchToMode "move"; }
+        bind "Alt h" { MoveFocusOrTab "left"; }
+        bind "Alt l" { MoveFocusOrTab "right"; }
+        bind "Alt j" { MoveFocus "down"; }
+        bind "Alt k" { MoveFocus "up"; }
+    }
+}
+
 theme "dopamine"
 default_layout "dash"          // plain `zellij` = your dashboard home session
 pane_frames false              // clean look; zjstatus carries the state

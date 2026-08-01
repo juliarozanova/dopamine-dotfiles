@@ -27,10 +27,15 @@ need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1 (try: tk
 
 # ---------------------------------------------------------------- helpers ----
 
+# vim motions for every tk fzf picker: ctrl-j/k move, ctrl-d/u half-page,
+# ctrl-f/b full page (plain j/k stay literal — you still need to type queries)
+FZF_VIM_BINDS='ctrl-j:down,ctrl-k:up,ctrl-d:half-page-down,ctrl-u:half-page-up,ctrl-f:page-down,ctrl-b:page-up'
+
 pick_ticket() {
   need jira; need fzf
   jira issue list -a"$(jira me)" --plain --columns key,status,summary 2>/dev/null \
     | fzf --header-lines=1 --prompt='ticket> ' --height=60% --reverse \
+          --bind "$FZF_VIM_BINDS" \
     | awk '{print $1}'
 }
 
@@ -56,7 +61,7 @@ repo_for() {
   # 3) ask, once, and remember
   need fzf
   hit=$(find "$CODE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
-    | fzf --prompt="repo for $t> " --height=40% --reverse) || true
+    | fzf --prompt="repo for $t> " --height=40% --reverse --bind "$FZF_VIM_BINDS") || true
   [[ -n "$hit" ]] || die "no repo chosen (put checkouts in $CODE, or map prefixes in $CONF)"
   echo "$hit"
 }

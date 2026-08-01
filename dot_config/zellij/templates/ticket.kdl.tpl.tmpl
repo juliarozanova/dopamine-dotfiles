@@ -32,22 +32,28 @@ layout {
             }
         }
         children
+        // instruction ribbon — keybinding hints at the bottom
+        pane size=2 borderless=true {
+            plugin location="zellij:status-bar"
+        }
     }
 
     tab name="${TICKET}" cwd="${WORKTREE}" focus=true {
         pane split_direction="vertical" {
-            // ── main stage: nvim, opened on the ticket ──────────────
-            pane size="62%" name="nvim" command="nvim" {
-                args "TICKET.md"
+            // ── main stage: nvim + lazygit stacked together ─────────
+            pane size="62%" stacked=true {
+                pane name="nvim" command="nvim" expanded=true {
+                    args "TICKET.md"
+                }
+                pane name="⎇ lazygit" command="lazygit"
             }
             // ── the stack: expand what you need, rest fold to titles ─
             pane size="38%" stacked=true {
-                pane name="✳ claude" command="bash" {
+                pane name="✳ claude" command="bash" expanded=true {
                     args "-lc" "claude --continue 2>/dev/null || claude"
                 }
-                pane name="⎇ lazygit" command="lazygit" expanded=true
-                pane name="◫ ticket" command="bash" {
-                    args "-lc" "jira issue view ${TICKET} --comments 10 | less -R"
+                pane name="◫ ticket" command="tk-ticket-pane" {
+                    args "${TICKET}"
                 }
                 pane name="❯ shell"
             }

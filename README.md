@@ -61,12 +61,18 @@ inside zellij — opens it as a new tab):
 
 ```
 ┌───────────────────┬──────────────┐
-│                   │ ✳ claude     │  ← stacked: expand what
-│  nvim (62%)       │ ⎇ lazygit    │    you need, the rest
-│  TICKET.md        │ ◫ ticket     │    fold to title bars
-│                   │ ❯ shell      │
+│  nvim (62%)       │ ✳ claude     │  ← both columns stacked:
+│  TICKET.md        │ ◫ ticket     │    expand what you need,
+├───────────────────┤ ❯ shell      │    the rest fold to
+│  ⎇ lazygit        │              │    title bars
 └───────────────────┴──────────────┘
 ```
+
+The ticket pane is interactive (`tk-ticket-pane`): it shows just the ticket
+body and comments, with **[r]** refresh (also re-syncs `TICKET.md`),
+**[c]** add a one-line Jira comment, **[w]** open in browser.
+Pane movement is `Alt h/j/k/l`; `Ctrl h` is left free for nvim
+(zellij's move mode lives on `Alt m`).
 
 - Commits on the branch get auto-prefixed `FRD-123:` → Jira's GitHub
   integration links them to the ticket with zero effort.
@@ -130,6 +136,7 @@ scheme (Windows Terminal / WezTerm / kitty) can join via another
 | path | what |
 |---|---|
 | `dot_local/bin/executable_tk` | the whole workflow: open / done / refresh / ls / doctor |
+| `dot_local/bin/executable_tk-ticket-pane` | interactive ticket pane: [r]efresh / [c]omment / [w]eb |
 | `dot_local/bin/executable_paper` | arXiv → knowledge note |
 | `dot_local/share/tk/prepare-commit-msg` | ticket-prefix hook (installed per-repo by tk) |
 | `dot_local/share/tk/summary-prompt.md` | the prompt `tk done` pipes into `claude -p` |

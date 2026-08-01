@@ -19,6 +19,10 @@ layout {
             }
         }
         children
+        // instruction ribbon — keybinding hints at the bottom
+        pane size=2 borderless=true {
+            plugin location="zellij:status-bar"
+        }
     }
 
     tab name="dash" cwd="{{ .chezmoi.homeDir }}/Dashboard" focus=true {
@@ -28,7 +32,7 @@ layout {
                     args "dash"
                 }
                 pane name="◷ sprint" command="bash" {
-                    args "-lc" "jira sprint list --current --plain 2>/dev/null | less -R"
+                    args "-lc" "{ jira sprint list --current --plain 2>/dev/null || echo 'no active sprint found — check jira-cli board config (jira init)'; } | less -R"
                 }
             }
             pane stacked=true {
