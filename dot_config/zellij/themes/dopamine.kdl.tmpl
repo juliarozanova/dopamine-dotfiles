@@ -37,12 +37,14 @@ themes {
             emphasis_3 "{{ .palette.teal }}"
         }
         ribbon_unselected {
+            // all four emphasis slots the same so the status-bar keybind keys
+            // (<g> <p> <t> …) don't zebra between colours — one consistent peach
             base "{{ .palette.overlay }}"
             background "{{ .palette.surface }}"
             emphasis_0 "{{ .palette.peach }}"
-            emphasis_1 "{{ .palette.fg }}"
-            emphasis_2 "{{ .palette.teal }}"
-            emphasis_3 "{{ .palette.pink }}"
+            emphasis_1 "{{ .palette.peach }}"
+            emphasis_2 "{{ .palette.peach }}"
+            emphasis_3 "{{ .palette.peach }}"
         }
         table_title {
             base "{{ .palette.green }}"

@@ -1,25 +1,17 @@
 // dash — home base. Plain `zellij` lands here (default_layout).
 // Left stack: PRs + sprint. Right stack: knowledge inbox + files + shell.
+//
+// Chrome is stock zellij: the built-in tab-bar (top) and status-bar keybind
+// ribbon (bottom), both coloured by the dopamine component theme. Pane frames
+// (config: pane_frames true) draw the outline around each pane.
 layout {
     default_tab_template {
+        // built-in tab strip
         pane size=1 borderless=true {
-            plugin location="file:{{ .chezmoi.homeDir }}/.config/zellij/plugins/zjstatus.wasm" {
-                format_left   "#[bg={{ .palette.pink }},fg={{ .palette.bg }},bold] ⌂ dash #[bg={{ .palette.surface }}]{mode}"
-                format_center "{tabs}"
-                format_right  "#[fg={{ .palette.overlay }}]{datetime}"
-                format_space  ""
-                mode_normal  "#[bg={{ .palette.surface }},fg={{ .palette.green }}] ● "
-                mode_locked  "#[bg={{ .palette.surface }},fg={{ .palette.red }}] ⊘ "
-                mode_default_to_mode "normal"
-                tab_normal   "#[fg={{ .palette.overlay }},bg={{ .palette.surface }}] {name} #[bg={{ .palette.bg }}] "
-                tab_active   "#[fg={{ .palette.bg }},bg={{ .palette.pink }},bold] {name} #[bg={{ .palette.bg }}] "
-                datetime          "{format}"
-                datetime_format   "%a %d %b · %H:%M"
-                datetime_timezone "Europe/London"
-            }
+            plugin location="zellij:tab-bar"
         }
         children
-        // instruction ribbon — keybinding hints at the bottom
+        // built-in keybind ribbon
         pane size=2 borderless=true {
             plugin location="zellij:status-bar"
         }
