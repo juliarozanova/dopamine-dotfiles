@@ -27,8 +27,8 @@ tk doctor        # shows what's left to install
 jira init        # jira-cli auth: pick "API token", paste a Jira PAT
 ```
 
-(or clone and run `./install.sh`.) `chezmoi apply` also auto-downloads
-**zjstatus.wasm** — the status bar — via `.chezmoiexternal.toml`.
+(or clone and run `./install.sh`.) Zellij chrome is the stock built-in
+tab-bar + status-bar, coloured by the dopamine theme — no plugins to fetch.
 
 ### Dependencies
 
@@ -45,6 +45,30 @@ npm install -g @anthropic-ai/claude-code
 
 On apt-based WSL, most of the above exist via `apt`/`brew` on Linux;
 zellij and yazi are easiest from their GitHub release binaries or `cargo`.
+
+## tk — command reference
+
+These are **all** the commands that exist today. (`tk tui` is *not* one of
+them — a Rust/ratatui ticket pane is in development in `tk-tui/`, see
+"Work in progress" below.)
+
+| command | what it does |
+|---|---|
+| `tk` | fzf-pick one of your open Jira tickets, then open it |
+| `tk FRD-123` | open (create if needed) worktree + zellij session for a ticket |
+| `tk done [KEY]` | Claude-summarise the branch work → confirm → post as Jira comment + log learnings |
+| `tk refresh` | re-pull ticket text + comments into `TICKET.md` (run inside a worktree) |
+| `tk ls` | list ticket worktrees |
+| `tk doctor` | check dependencies **and live Jira auth** — run this first when anything misbehaves |
+
+Inside the ticket pane (`◫ ticket` in the layout): **r** refresh,
+**c** one-line comment, **w** open in browser. In the fzf pickers:
+`ctrl-j/k` move, `ctrl-d/u` half-page, `ctrl-f/b` page.
+
+If Jira ever returns nothing ("No result found"), it's almost always an
+expired API token — `tk doctor` will tell you and print the regeneration
+steps. The token lives in `~/.config/jira-board/env` (single source of
+truth; every tk entry point sources it).
 
 ## The daily loop
 
@@ -107,7 +131,7 @@ surface.
 ## The scheme 🎨 — dopamine.nvim, everywhere
 
 All colours live in **`.chezmoidata/palette.toml`** — edit → `chezmoi apply`
-→ the zellij theme + both status bars re-render. It's ported straight from
+→ the zellij theme (tabs, ribbon, frames) re-renders. It's ported straight from
 [dopamine.nvim](https://github.com/juliarozanova/dopamine.nvim)'s
 `colors.lua`: the **dark** variant is active, with **mirage** and **light**
 as commented blocks below it — swap a block, apply, done. Notable mapping:
@@ -143,3 +167,17 @@ scheme (Windows Terminal / WezTerm / kitty) can join via another
 | `dot_config/zellij/templates/ticket.kdl.tpl.tmpl` | per-ticket layout (palette baked by chezmoi, `$TICKET` by tk) |
 | `dot_config/zellij/layouts/dash.kdl.tmpl` | home layout — plain `zellij` lands here |
 | `.chezmoidata/palette.toml` | 🎨 the one file to retheme everything |
+| `tk-tui/` | 🚧 work in progress — see below |
+
+## Work in progress: `tk-tui` (Rust/ratatui ticket pane)
+
+`tk-tui/` holds a half-built ratatui rewrite of the ticket pane. **It does
+not compile or run yet** — only the data-source (`jira.rs`, shells out to
+jira-cli `--raw`) and ADF renderer (`adf.rs`) exist; `main.rs`/`app.rs`/`ui.rs`
+are still to come. Until it lands, the ticket pane is the bash
+`tk-ticket-pane`, and there is no `tk tui`/`tk view` subcommand.
+
+Planned (per `to_fix.md` + plan): full vim motions (hjkl, u/d, gg/G),
+comment selection + quoted **reply**, `tk view [KEY] [--float]` to run it in
+any pane or float it over a session, TICKET.md removal (nvim opens plain),
+and a chezmoi `run_onchange` hook that `cargo install`s it on apply.
