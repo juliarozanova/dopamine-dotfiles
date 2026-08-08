@@ -32,7 +32,8 @@ tab-bar + status-bar, coloured by the dopamine theme — no plugins to fetch.
 
 ### Dependencies
 
-Required: `git nvim zellij jira fzf jq lazygit claude gettext` (envsubst).
+Required: `git nvim zellij jira fzf jq lazygit claude gettext` (envsubst),
+and `rust` (cargo — builds `tk-tui` on `chezmoi apply`).
 Delightful: `gh` + [gh-dash](https://github.com/dlvhdr/gh-dash), `yazi`,
 `glow`, `bat`, `onefetch`, `starship`, `presenterm`.
 
@@ -48,22 +49,20 @@ zellij and yazi are easiest from their GitHub release binaries or `cargo`.
 
 ## tk — command reference
 
-These are **all** the commands that exist today. (`tk tui` is *not* one of
-them — a Rust/ratatui ticket pane is in development in `tk-tui/`, see
-"Work in progress" below.)
-
 | command | what it does |
 |---|---|
 | `tk` | fzf-pick one of your open Jira tickets, then open it |
 | `tk FRD-123` | open (create if needed) worktree + zellij session for a ticket |
+| `tk view [KEY] [--float]` | **the ticket TUI** (tk-tui) in this terminal; `--float` = zellij floating pane. KEY inferred from cwd → session name → picker. `tk tui` is an alias |
 | `tk done [KEY]` | Claude-summarise the branch work → confirm → post as Jira comment + log learnings |
-| `tk refresh` | re-pull ticket text + comments into `TICKET.md` (run inside a worktree) |
 | `tk ls` | list ticket worktrees |
 | `tk doctor` | check dependencies **and live Jira auth** — run this first when anything misbehaves |
 
-Inside the ticket pane (`◫ ticket` in the layout): **r** refresh,
-**c** one-line comment, **w** open in browser. In the fzf pickers:
-`ctrl-j/k` move, `ctrl-d/u` half-page, `ctrl-f/b` page.
+**Inside the ticket TUI**: `j/k` scroll, `u/d` half-page, `gg`/`G`,
+`J/K` select comment, **r** refresh, **c** new comment, **R** reply
+(quotes the selected comment), **w** open in browser, `q` quit.
+In compose: `ctrl-s` send, `esc` cancel (draft kept).
+In the fzf pickers: `ctrl-j/k` move, `ctrl-d/u` half-page, `ctrl-f/b` page.
 
 If Jira ever returns nothing ("No result found"), it's almost always an
 expired API token — `tk doctor` will tell you and print the regeneration
@@ -77,24 +76,26 @@ tk                # fzf over your open tickets → pick one
 tk FRD-123        # or go straight there
 ```
 
-`tk` creates the branch + worktree `Work/FRD-123-<slug>/`, writes the ticket
-text + comments into `TICKET.md`, seeds `CLAUDE.local.md` so Claude spawns
-already knowing the ticket, installs the commit-prefix hook into the parent
-repo, and opens the zellij session (or attaches, or — if you're already
-inside zellij — opens it as a new tab):
+`tk` creates the branch + worktree `Work/FRD-123-<slug>/`, seeds
+`CLAUDE.local.md` so Claude spawns already knowing the ticket (it points
+Claude at `jira issue view` — there is no local ticket file to drift),
+installs the commit-prefix hook into the parent repo, and opens the zellij
+session (or attaches, or — if you're already inside zellij — opens it as a
+new tab):
 
 ```
 ┌───────────────────┬──────────────┐
 │  nvim (62%)       │ ✳ claude     │  ← both columns stacked:
-│  TICKET.md        │ ◫ ticket     │    expand what you need,
+│                   │ ◫ ticket     │    expand what you need,
 ├───────────────────┤ ❯ shell      │    the rest fold to
 │  ⎇ lazygit        │              │    title bars
 └───────────────────┴──────────────┘
 ```
 
-The ticket pane is interactive (`tk-ticket-pane`): it shows just the ticket
-body and comments, with **[r]** refresh (also re-syncs `TICKET.md`),
-**[c]** add a one-line Jira comment, **[w]** open in browser.
+The `◫ ticket` pane is **tk-tui** (Rust/ratatui): title, description and
+comments only — no metadata noise — with full vim motions and comment
+replies (key table above). It's the same TUI you get anywhere via
+`tk view`, so nothing about it is welded to this layout.
 Pane movement is `Alt h/j/k/l`; `Ctrl h` is left free for nvim
 (zellij's move mode lives on `Alt m`).
 
@@ -102,7 +103,7 @@ Pane movement is `Alt h/j/k/l`; `Ctrl h` is left free for nvim
   integration links them to the ticket with zero effort.
 - The claude pane runs `claude --continue`, which resumes the most recent
   conversation *in that directory* — so each worktree keeps its own thread.
-- `tk refresh` re-pulls ticket text/comments. `tk ls` lists open worktrees.
+- `r` in the ticket TUI re-pulls ticket text/comments. `tk ls` lists open worktrees.
 - `Ctrl o w` (zellij session manager) is your ticket switcher; sessions
   survive reboots via session serialization.
 
@@ -159,25 +160,22 @@ scheme (Windows Terminal / WezTerm / kitty) can join via another
 
 | path | what |
 |---|---|
-| `dot_local/bin/executable_tk` | the whole workflow: open / done / refresh / ls / doctor |
-| `dot_local/bin/executable_tk-ticket-pane` | interactive ticket pane: [r]efresh / [c]omment / [w]eb |
+| `dot_local/bin/executable_tk` | the whole workflow: open / view / done / ls / doctor |
+| `tk-tui/` | 🦀 the ratatui ticket TUI (`tk view`) — jira-cli `--raw` + ADF renderer |
+| `run_onchange_before_20-build-tk-tui.sh.tmpl` | `cargo install`s tk-tui on `chezmoi apply` when its source changes |
 | `dot_local/bin/executable_paper` | arXiv → knowledge note |
 | `dot_local/share/tk/prepare-commit-msg` | ticket-prefix hook (installed per-repo by tk) |
 | `dot_local/share/tk/summary-prompt.md` | the prompt `tk done` pipes into `claude -p` |
-| `dot_config/zellij/templates/ticket.kdl.tpl.tmpl` | per-ticket layout (palette baked by chezmoi, `$TICKET` by tk) |
+| `dot_config/zellij/templates/ticket.kdl.tpl.tmpl` | per-ticket layout (`$TICKET` baked by tk at open) |
 | `dot_config/zellij/layouts/dash.kdl.tmpl` | home layout — plain `zellij` lands here |
 | `.chezmoidata/palette.toml` | 🎨 the one file to retheme everything |
-| `tk-tui/` | 🚧 work in progress — see below |
 
-## Work in progress: `tk-tui` (Rust/ratatui ticket pane)
+`tk-tui` colours come from the terminal's ANSI palette, so it inherits the
+dopamine scheme (and any future light/dark switch) for free.
 
-`tk-tui/` holds a half-built ratatui rewrite of the ticket pane. **It does
-not compile or run yet** — only the data-source (`jira.rs`, shells out to
-jira-cli `--raw`) and ADF renderer (`adf.rs`) exist; `main.rs`/`app.rs`/`ui.rs`
-are still to come. Until it lands, the ticket pane is the bash
-`tk-ticket-pane`, and there is no `tk tui`/`tk view` subcommand.
+Optional zellij keybinding for a floating ticket pane from anywhere
+(add inside the `keybinds { shared_except "locked" { … } }` block):
 
-Planned (per `to_fix.md` + plan): full vim motions (hjkl, u/d, gg/G),
-comment selection + quoted **reply**, `tk view [KEY] [--float]` to run it in
-any pane or float it over a session, TICKET.md removal (nvim opens plain),
-and a chezmoi `run_onchange` hook that `cargo install`s it on apply.
+```kdl
+bind "Alt y" { Run "tk" "view" "--float" { floating true; }; }
+```

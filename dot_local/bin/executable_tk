@@ -4,8 +4,8 @@
 #
 #   tk              fzf-pick one of your open tickets, then open it
 #   tk FRD-123      open (create if needed) worktree + zellij session for a ticket
+#   tk view [KEY]   ticket TUI in this terminal (--float: zellij floating pane)
 #   tk done [KEY]   summarise work via Claude, post as Jira comment, log learnings
-#   tk refresh      re-pull ticket text + comments into TICKET.md
 #   tk ls           list ticket worktrees
 #   tk doctor       check dependencies
 set -euo pipefail
@@ -86,27 +86,25 @@ install_hook() {
   fi
 }
 
-write_ticket_context() {
+write_claude_context() {
   local t="$1" sum="$2" wt="$3"
-  jira issue view "$t" --comments 10 --plain > "$wt/TICKET.md" 2>/dev/null \
-    || echo "# $t — $sum (jira fetch failed; run: tk refresh)" > "$wt/TICKET.md"
   if [[ ! -f "$wt/CLAUDE.local.md" ]]; then
     cat > "$wt/CLAUDE.local.md" <<EOF
 # Context: $t
 
 We are working on Jira ticket **$t**: $sum
 
-- Ticket description and comments: @TICKET.md
+- Ticket description and comments: run \`jira issue view $t --comments 10 --plain\`
 - HDL best practices live at: $KNOW/hdl/best-practices.md — follow them, and
   flag when we discover something that should be added.
 - When we finish something notable, state it as a one-line learning.
   Tag HDL-framework insights with #hdl so they get harvested by \`tk done\`.
 EOF
   fi
-  # keep tk's context files out of accidental commits
-  grep -qxF 'TICKET.md' "$wt/.git/info/exclude" 2>/dev/null || {
+  # keep tk's context file out of accidental commits
+  grep -qxF 'CLAUDE.local.md' "$wt/.git/info/exclude" 2>/dev/null || {
     local excl; excl="$(git -C "$wt" rev-parse --git-path info/exclude 2>/dev/null)"
-    [[ -n "$excl" ]] && printf 'TICKET.md\nCLAUDE.local.md\n' >> "$excl"
+    [[ -n "$excl" ]] && printf 'CLAUDE.local.md\n' >> "$excl"
   }
 }
 
@@ -139,7 +137,7 @@ cmd_open() {
     echo "tk: worktree $wt"
   fi
   install_hook "$repo"
-  write_ticket_context "$t" "$sum" "$wt"
+  write_claude_context "$t" "$sum" "$wt"
 
   [[ -f "$TPL" ]] || die "layout template missing: $TPL"
   local rendered="/tmp/zj-$t.kdl"
@@ -185,12 +183,32 @@ cmd_done() {
   echo "tk: logged → Knowledge/tickets/$t.md  (#hdl lines → Knowledge/hdl/inbox.md)"
 }
 
-cmd_refresh() {
-  local t; t="$(ticket_from_cwd)"
-  [[ -n "$t" ]] || die "run inside a ticket worktree"
+# tk view [KEY] [--float] — the ratatui ticket pane (tk-tui), runnable in any
+# terminal/pane. KEY is inferred from cwd, then the zellij session name, else
+# the fzf picker. --float spawns it as a zellij floating pane.
+cmd_view() {
   need jira
-  jira issue view "$t" --comments 10 --plain > "$PWD/TICKET.md"
-  echo "tk: refreshed TICKET.md for $t"
+  local float=0 t="" a
+  for a in "$@"; do
+    case "$a" in
+      --float) float=1;;
+      *) t="$a";;
+    esac
+  done
+  [[ -z "$t" ]] && t="$(ticket_from_cwd)"
+  if [[ -z "$t" && -n "${ZELLIJ_SESSION_NAME:-}" ]]; then
+    t="$(printf '%s' "$ZELLIJ_SESSION_NAME" | grep -oE '^[A-Za-z][A-Za-z0-9]*-[0-9]+' || true)"
+  fi
+  [[ -z "$t" ]] && t="$(pick_ticket)"
+  [[ -n "$t" ]] || die "no ticket selected"
+  t="$(printf '%s' "$t" | tr '[:lower:]' '[:upper:]')"
+  command -v tk-tui >/dev/null 2>&1 \
+    || die "tk-tui not installed — run: chezmoi apply (builds it via cargo)"
+  if [[ $float -eq 1 && -n "${ZELLIJ:-}" ]]; then
+    zellij run --floating --width "70%" --height "85%" --name "◫ $t" -- tk view "$t"
+  else
+    exec tk-tui "$t"
+  fi
 }
 
 cmd_ls() {
@@ -199,7 +217,7 @@ cmd_ls() {
 
 cmd_doctor() {
   local d ok=1
-  for d in git jira jq fzf zellij nvim lazygit claude envsubst glow yazi; do
+  for d in git jira jq fzf zellij nvim lazygit claude envsubst glow yazi cargo tk-tui; do
     if command -v "$d" >/dev/null 2>&1; then printf '  ✓ %s\n' "$d"
     else printf '  ✗ %s\n' "$d"; ok=0; fi
   done
@@ -231,7 +249,7 @@ cmd_doctor() {
 
 case "${1:-}" in
   done)    shift; cmd_done "$@";;
-  refresh) cmd_refresh;;
+  view|tui) shift; cmd_view "$@";;
   ls)      cmd_ls;;
   doctor)  cmd_doctor;;
   -h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//';;

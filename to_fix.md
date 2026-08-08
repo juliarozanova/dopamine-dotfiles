@@ -1,7 +1,33 @@
-1. TK ticket selector needs vim motions
-2. Zellij instruction ribbon and tabs?? I like them to be visible. Especially on the dash home screen, it's not showing tabs.
-3. Ctrl h l j k not working in neovim - it's being overridden by something, but I need it. Alt hjkl should be the within-zellij movement.
-4. I want the lazygit stacked pane together with neovim, not on the RHS sidebar where claude, ticket and 
-5. The jira ticket needs to be a bit more functional. It needs a [r] refresh button, a [c] comment button. I want the pane just to show the ticket body text and comments beneath, not all the extra metadata. Look at ~/dotfiles/bin/jira-board for an example, there a custom jira pane code there somewhere?
-6. I'm still not sure about the dash homepage on zellij. What's up with the "sprint" page, what is that supposed to be loading? Why does it specifically have an hdl-inbox, what is that for and how is it used?
+# TO DO
+(empty — next ideas land here)
 
+## Future direction (tk-tui)
+- issue-list mode replacing the fzf picker
+- status transitions from the TUI (To Do → In Progress → …)
+- sprint board view
+
+# Accepted / won't fix
+1. The alternating `<` colours in the zellij bottom ribbon are hardcoded in
+   zellij's status-bar plugin (alternate segments paint their brackets in the
+   terminal-background colour; not exposed to themes). Stock behaviour on
+   every zellij install — accepted.
+
+# Done
+1. ~~Remove the TICKET.md functionality~~ — gone; nvim opens plain, Claude
+   context points at `jira issue view`, the TUI is the only Jira surface.
+2. ~~Ticket pane modular~~ — `tk view [KEY] [--float]` (alias `tk tui`) runs
+   the ratatui pane in any terminal, floats it in zellij, and the ticket
+   layout uses the same entry point. Optional keybinding snippet in README.
+3. ~~Reply + vim motions in the tk interface~~ — tk-tui: j/k, u/d, gg/G,
+   J/K comment select, R quoted reply, c comment, r refresh, w web.
+4. TK ticket selector vim motions (fzf ctrl-j/k etc.)
+5. Zellij ribbon + tabs visible, dopamine-themed (component theme port)
+6. Ctrl-hjkl freed for neovim; Alt-hjkl is zellij movement
+7. lazygit stacked with neovim in the main stage
+8. Functional jira ticket pane (superseded by tk-tui)
+9. Dash "sprint" pane → "my issues" (team-managed projects have no sprint
+   list); hdl-inbox documented (tk done harvests #hdl lines → weekly prune)
+
+# Parked (theming — revisit later)
+7. Dash colour scheme?
+8. Light/dark from the single chezmoi palette?

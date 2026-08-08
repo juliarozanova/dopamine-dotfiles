@@ -22,9 +22,7 @@ layout {
         pane split_direction="vertical" {
             // ── main stage: nvim + lazygit stacked together ─────────
             pane size="62%" stacked=true {
-                pane name="nvim" command="nvim" expanded=true {
-                    args "TICKET.md"
-                }
+                pane name="nvim" command="nvim" expanded=true
                 pane name="⎇ lazygit" command="lazygit"
             }
             // ── the stack: expand what you need, rest fold to titles ─
@@ -32,8 +30,8 @@ layout {
                 pane name="✳ claude" command="bash" expanded=true {
                     args "-lc" "claude --continue 2>/dev/null || claude"
                 }
-                pane name="◫ ticket" command="tk-ticket-pane" {
-                    args "${TICKET}"
+                pane name="◫ ticket" command="tk" {
+                    args "view" "${TICKET}"
                 }
                 pane name="❯ shell"
             }

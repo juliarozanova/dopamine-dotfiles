@@ -1,0 +1,17 @@
+#!/bin/sh
+# Builds/installs tk-tui (the ratatui ticket pane) whenever its source changes.
+# chezmoi re-runs this script when the hashes below change:
+#
+# Cargo.toml: {{ include (joinPath .chezmoi.sourceDir "tk-tui/Cargo.toml") | sha256sum }}
+# Cargo.lock: {{ include (joinPath .chezmoi.sourceDir "tk-tui/Cargo.lock") | sha256sum }}
+{{- range glob (joinPath .chezmoi.sourceDir "tk-tui/src/*.rs") }}
+# {{ base . }}: {{ include . | sha256sum }}
+{{- end }}
+set -e
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "tk-tui: cargo not found — skipping build (brew install rust, then chezmoi apply)"
+  exit 0
+fi
+echo "tk-tui: building (cargo install, first run takes a minute)…"
+cargo install --path "{{ .chezmoi.sourceDir }}/tk-tui" --root "$HOME/.local" --locked --quiet
+echo "tk-tui: installed → ~/.local/bin/tk-tui"

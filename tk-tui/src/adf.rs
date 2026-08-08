@@ -3,7 +3,7 @@
 //! bullet/ordered lists, code blocks, blockquotes, rules, hard breaks, and
 //! the strong/em/code/link marks. Unknown nodes fall back to their children.
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 
