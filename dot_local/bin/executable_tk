@@ -33,7 +33,11 @@ FZF_VIM_BINDS='ctrl-j:down,ctrl-k:up,ctrl-d:half-page-down,ctrl-u:half-page-up,c
 
 pick_ticket() {
   need jira; need fzf
-  jira issue list -a"$(jira me)" --plain --columns key,status,summary 2>/dev/null \
+  # Jira Cloud rejects an email address as an assignee filter (`-a <email>`),
+  # so query by JQL currentUser() instead — robust regardless of how `jira me`
+  # reports you. Open tickets only (statusCategory != Done).
+  jira issue list -q 'assignee = currentUser() AND statusCategory != Done' \
+       --plain --columns key,status,summary 2>/dev/null \
     | fzf --header-lines=1 --prompt='ticket> ' --height=60% --reverse \
           --bind "$FZF_VIM_BINDS" \
     | awk '{print $1}'
@@ -194,7 +198,29 @@ cmd_doctor() {
     else printf '  ✗ %s\n' "$d"; ok=0; fi
   done
   [[ -f "$TPL" ]] && printf '  ✓ layout template\n' || { printf '  ✗ layout template (%s)\n' "$TPL"; ok=0; }
-  [[ $ok -eq 1 ]] && echo "all good ✨" || echo "install the ✗ ones (see README)"
+
+  # Live Jira auth check. `jira me` only echoes cached config, so it can't tell
+  # you the token is dead — hit /myself directly and read the HTTP status.
+  local conf="$HOME/.config/.jira/.config.yml" server login code
+  server="$(awk '/^server:/{print $2}' "$conf" 2>/dev/null)"
+  login="$(awk '/^login:/{print $2}' "$conf" 2>/dev/null)"
+  if [[ -z "$server" || -z "$login" ]]; then
+    printf '  ✗ jira config (%s missing server/login — run: jira init)\n' "$conf"; ok=0
+  elif [[ -z "${JIRA_API_TOKEN:-}" ]]; then
+    printf '  ✗ JIRA_API_TOKEN not set in this shell\n'; ok=0
+  else
+    code="$(curl -s -o /dev/null -w '%{http_code}' -u "$login:$JIRA_API_TOKEN" "$server/rest/api/3/myself" 2>/dev/null)"
+    if [[ "$code" == 200 ]]; then printf '  ✓ jira auth\n'
+    else
+      printf '  ✗ jira auth (HTTP %s) — token invalid/expired.\n' "$code"
+      printf '      regenerate: https://id.atlassian.com/manage-profile/security/api-tokens\n'
+      printf '      then update JIRA_API_TOKEN in ~/.zshrc and ~/.config/jira-board/env,\n'
+      printf '      and restart the zellij server (zellij kill-all-sessions) so panes pick it up.\n'
+      ok=0
+    fi
+  fi
+
+  [[ $ok -eq 1 ]] && echo "all good ✨" || echo "fix the ✗ ones (see README)"
 }
 
 case "${1:-}" in

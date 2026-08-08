@@ -23,8 +23,11 @@ layout {
                 pane name="⇅ pull requests" command="gh" expanded=true {
                     args "dash"
                 }
-                pane name="◷ sprint" command="bash" {
-                    args "-lc" "{ jira sprint list --current --plain 2>/dev/null || echo 'no active sprint found — check jira-cli board config (jira init)'; } | less -R"
+                pane name="◷ my issues" command="bash" {
+                    // Team-managed (next-gen) projects don't list sprints via
+                    // `jira sprint list`, so lead with your open assigned issues
+                    // (always useful) and only try the sprint view as a bonus.
+                    args "-lc" "{ echo '── my open issues ──'; jira issue list -q 'assignee = currentUser() AND statusCategory != Done' --plain --columns key,status,summary 2>&1; echo; echo '── current sprint (if any) ──'; jira sprint list --current --plain 2>&1; } | less -R"
                 }
             }
             pane stacked=true {

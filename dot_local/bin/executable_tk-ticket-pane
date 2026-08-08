@@ -7,6 +7,15 @@
 set -u
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
+# jira-cli reads JIRA_API_TOKEN from the environment; this pane is forked from
+# the long-lived zellij server, whose env snapshot can predate a token refresh.
+# Fall back to the secret env file so a fresh token takes effect without a full
+# server restart.
+if [ -z "${JIRA_API_TOKEN:-}" ] && [ -f "$HOME/.config/jira-board/env" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.config/jira-board/env"
+fi
+
 KEY="${1:?usage: tk-ticket-pane ISSUE-KEY}"
 NCOMMENTS=10
 
