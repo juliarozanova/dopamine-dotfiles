@@ -38,6 +38,10 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        anyhow::bail!("tk-tui needs a TTY — use `tk-tui --dump {key}` for plain output");
+    }
+
     let mut app = App::new(&key)?;
     let mut terminal = ratatui::init(); // raw mode + alt screen + panic hook
     let res = run(&mut terminal, &mut app);

@@ -192,6 +192,7 @@ cmd_view() {
   for a in "$@"; do
     case "$a" in
       --float) float=1;;
+      -*) die "tk view: unknown flag $a (usage: tk view [KEY] [--float])";;
       *) t="$a";;
     esac
   done
