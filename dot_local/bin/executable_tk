@@ -22,6 +22,12 @@ TPL="${XDG_CONFIG_HOME:-$HOME/.config}/zellij/templates/ticket.kdl.tpl"
 
 mkdir -p "$STATE" "$WORK" "$KNOW/tickets" "$KNOW/hdl"
 
+# Prefer the on-disk token over a possibly-stale env snapshot: when tk runs in a
+# zellij pane forked from a long-lived server, the inherited JIRA_API_TOKEN can
+# be revoked/old. Sourcing the secret file makes a refreshed token win. Safe
+# no-op if absent.
+[[ -f "$HOME/.config/jira-board/env" ]] && . "$HOME/.config/jira-board/env"
+
 die()  { printf 'tk: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1 (try: tk doctor)"; }
 
