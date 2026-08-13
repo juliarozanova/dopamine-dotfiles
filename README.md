@@ -49,17 +49,18 @@ zellij and yazi are easiest from their GitHub release binaries or `cargo`.
 
 ## Applying changes — the chezmoi loop
 
-`~/.config/chezmoi/chezmoi.toml` points chezmoi's source at this working tree:
+Bootstrapped with `chezmoi init`, the source lives at `~/.local/share/chezmoi`
+and there's nothing to configure. If you'd rather edit a working tree directly,
+point chezmoi at it once in `~/.config/chezmoi/chezmoi.toml`:
 
 ```toml
-sourceDir = "/Users/julia/dopamine-dotfiles"
+sourceDir = "/home/you/dopamine-dotfiles"    # /Users/you/… on macOS
 ```
 
-so **the repo you edit is the one `chezmoi apply` renders** — no commit-then-pull
-step, and no second copy under `~/.local/share/chezmoi` drifting out of sync.
-(That's chezmoi's default source dir; without this setting, edits here quietly
-don't apply.) On a fresh machine `install.sh` does the same thing via
-`--source`.
+…so **the repo you edit is the one `chezmoi apply` renders**. Without it chezmoi
+keeps using its own clone and your edits quietly don't apply — with two copies
+around, that's a confusing afternoon. `install.sh` passes the same thing via
+`--source` when run from a clone.
 
 ```sh
 chezmoi diff                                  # what would change, as a patch
@@ -267,7 +268,7 @@ macOS toggle and it changes live — no `chezmoi apply`, no restart:
 | | how it notices |
 |---|---|
 | WezTerm | `window-config-reloaded` + `get_appearance()` |
-| Neovim | polls `defaults read -g AppleInterfaceStyle` (`lua/config/autocmds.lua`) |
+| Neovim | checks `AppleInterfaceStyle` on focus + a 5s timer (`lua/config/autocmds.lua`) — **macOS only** |
 | yazi | asks the terminal for its background colour |
 | tk-tui | reads the appearance at startup — each `tk view` is a fresh process |
 
@@ -298,10 +299,31 @@ otherwise dark session. To move the whole stack, flip macOS **and** set
 zellij / gh-dash / tk-tui will render it via `variant`, but WezTerm only ships
 dark and light — so the terminal underneath stays on whichever the OS says.
 
-> **Gap worth knowing:** the autocmd that makes nvim follow the OS lives in
-> `~/.config/nvim/lua/config/autocmds.lua`, which chezmoi does **not** manage —
-> only `colorscheme.lua` and `dopamine_palette.lua` are. A fresh machine gets the
-> colorscheme but not the automatic switching until that file is copied over too.
+### Other machines, including WSL
+
+`chezmoi apply` is the whole install. It vendors the colorscheme to
+`~/.local/share/dopamine-light` via `.chezmoiexternal.toml`, so nvim is themed
+on a box that has never heard of `~/Dashboard` — the lazy spec prefers a dev
+checkout at `~/Dashboard/Code/dopamine-light` when one exists and falls back to
+the vendored clone otherwise, so the same config serves both.
+
+The only macOS-specific piece is *automatic* appearance-following:
+`AppleInterfaceStyle` has no Linux equivalent. So off macOS:
+
+- `lua/config/autocmds.lua` renders **without** a watcher — polling something
+  that can't change is just a wasted process every few seconds — and nvim pins
+  to `[theme] variant` through the LazyVim `colorscheme` opt.
+- tk-tui's probe is `cfg!(target_os = "macos")`-gated, so it falls through to
+  `variant` too, spawning nothing.
+- WezTerm and yazi keep working unchanged: both ask the terminal/desktop, not
+  the OS API.
+
+Which means **off macOS, `variant` really is the global light switch** — set it,
+`chezmoi apply`, restart. (On macOS it stays the two-mover described above.)
+
+Nothing else assumes a platform: the tk-tui build script skips cleanly when
+`cargo` is absent, tk-tui opens tickets through `jira open` rather than `open(1)`,
+and `macos_window_background_blur` is simply ignored off macOS.
 
 ## Anatomy
 
@@ -318,6 +340,8 @@ dark and light — so the terminal underneath stays on whichever the OS says.
 | `.chezmoidata/palette.toml` | 🎨 every colour, all three variants — the one file to edit |
 | `dot_config/wezterm/wezterm.lua.tmpl` | terminal schemes + ANSI slots, generated from the palette |
 | `dot_config/nvim/lua/dopamine_palette.lua.tmpl` | the palette as a Lua table, injected into the colorscheme |
+| `dot_config/nvim/lua/config/autocmds.lua.tmpl` | macOS appearance watcher; renders empty off macOS |
+| `.chezmoiexternal.toml` | vendors the colorscheme so a fresh machine needs no dev checkout |
 | `dot_config/tk/theme.json.tmpl` | the palette as JSON, read by tk-tui at startup |
 | `dot_config/gh-dash/config.yml.tmpl` | gh-dash settings + palette-driven `theme.colors` |
 | `tk-tui/src/theme.rs` | role → colour mapping, with compiled-in dopamine-dark fallbacks |
