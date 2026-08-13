@@ -3,7 +3,8 @@
 //! bullet/ordered lists, code blocks, blockquotes, rules, hard breaks, and
 //! the strong/em/code/link marks. Unknown nodes fall back to their children.
 
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use crate::theme::theme;
+use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 
@@ -72,7 +73,7 @@ fn blocks(v: &Value, first: &str, rest: &str, out: &mut Vec<Line<'static>>) {
             }
         }
         "codeBlock" => {
-            let style = Style::default().fg(Color::Green);
+            let style = Style::default().fg(theme().code);
             for c in kids(v) {
                 for part in c["text"].as_str().unwrap_or("").split('\n') {
                     out.push(Line::from(vec![
@@ -91,7 +92,7 @@ fn blocks(v: &Value, first: &str, rest: &str, out: &mut Vec<Line<'static>>) {
         }
         "rule" => out.push(Line::styled(
             "────────────".to_string(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme().rule),
         )),
         // mediaGroup, panel, table, unknown … : just descend
         _ => {
@@ -114,7 +115,7 @@ fn inline_lines(v: &Value) -> Vec<Vec<Span<'static>>> {
             }
             "mention" => lines.last_mut().unwrap().push(Span::styled(
                 c["attrs"]["text"].as_str().unwrap_or("@?").to_string(),
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(theme().link),
             )),
             "emoji" => lines
                 .last_mut()
@@ -144,8 +145,8 @@ fn styled(text: String, marks: &Value) -> Span<'static> {
             match m["type"].as_str().unwrap_or("") {
                 "strong" => style = style.add_modifier(Modifier::BOLD),
                 "em" => style = style.add_modifier(Modifier::ITALIC),
-                "code" => style = style.fg(Color::Yellow),
-                "link" => style = style.add_modifier(Modifier::UNDERLINED).fg(Color::Cyan),
+                "code" => style = style.fg(theme().code_inline),
+                "link" => style = style.add_modifier(Modifier::UNDERLINED).fg(theme().link),
                 "strike" => style = style.add_modifier(Modifier::CROSSED_OUT),
                 _ => {}
             }

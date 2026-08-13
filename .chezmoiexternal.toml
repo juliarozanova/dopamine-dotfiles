@@ -5,21 +5,20 @@
 #  coloured by the dopamine component theme. No external plugin needed.)
 
 # ══════════════════════════════════════════════════════════════════
-#  dopamine.nvim — your colorscheme (juliarozanova/dopamine.nvim).
-#  Preferred install is via your nvim plugin manager (lazy spec in
-#  README). If you'd rather have chezmoi vendor the whole plugin so a
-#  fresh machine has it before lazy's first sync, uncomment:
+#  dopamine colorscheme — installed via the nvim plugin manager, from a
+#  local checkout (lazy spec: dot_config/nvim/lua/plugins/colorscheme.lua
+#  → dir = "~/Dashboard/Code/dopamine-light"). If you'd rather have
+#  chezmoi vendor the plugin so a fresh machine has it before lazy's
+#  first sync, uncomment:
 #
 # [".local/share/dopamine.nvim"]
 #     type = "git-repo"
-#     url = "https://github.com/juliarozanova/dopamine.nvim.git"
+#     url = "https://github.com/juliarozanova/dopamine-light.git"
 #     refreshPeriod = "168h"
 #
 #  …and point lazy at it with:  { dir = "~/.local/share/dopamine.nvim" }
 #
-#  Reference copy of the palette source, kept fresh for eyeballing:
-[".config/zellij/themes/dopamine-colors-reference.lua"]
-    type = "file"
-    url = "https://raw.githubusercontent.com/juliarozanova/dopamine.nvim/master/lua/dopamine/colors.lua"
-    refreshPeriod = "168h"
+#  (There used to be a fetched reference copy of the plugin's colors.lua
+#   here. It's gone: .chezmoidata/palette.toml is now the source those
+#   colours come *from*, so a downstream copy would only ever mislead.)
 # ══════════════════════════════════════════════════════════════════

@@ -8,6 +8,7 @@
 mod adf;
 mod app;
 mod jira;
+mod theme;
 mod ui;
 
 use anyhow::Result;

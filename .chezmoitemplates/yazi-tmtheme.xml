@@ -1,0 +1,100 @@
+{{/*
+  Shared body for the dopamine yazi tmThemes — included by
+  dot_config/yazi/flavors/dopamine-{dark,light}.yazi/tmtheme.xml.tmpl.
+  Generated from .chezmoidata/palette.toml; edit the palette, not this.
+  Expects a dict: .p = the variant's palette table, .name = variant name.
+
+  This is what syntect uses to highlight file previews. Scope → role mapping
+  mirrors the dopamine Neovim colorscheme, so a file previewed in yazi is
+  coloured the same way as the file open in nvim.
+*/ -}}
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>name</key>
+	<string>dopamine-{{ .name }}</string>
+	<key>semanticClass</key>
+	<string>dopamine.{{ .name }}</string>
+	<key>colorSpaceName</key>
+	<string>sRGB</string>
+	<key>settings</key>
+	<array>
+		<dict>
+			<key>settings</key>
+			<dict>
+				<key>accent</key>
+				<string>{{ .p.accent }}</string>
+				<key>background</key>
+				<string>{{ .p.bg }}</string>
+				<key>foreground</key>
+				<string>{{ .p.fg }}</string>
+				<key>caret</key>
+				<string>{{ .p.accent }}</string>
+				<key>selection</key>
+				<string>{{ .p.selection_bg }}</string>
+				<key>selectionBorder</key>
+				<string>{{ .p.selection_border }}</string>
+				<key>inactiveSelection</key>
+				<string>{{ .p.selection_inactive }}</string>
+				<key>lineHighlight</key>
+				<string>{{ .p.line }}</string>
+				<key>gutter</key>
+				<string>{{ .p.bg }}</string>
+				<key>gutterForeground</key>
+				<string>{{ .p.gutter_normal }}</string>
+				<key>guide</key>
+				<string>{{ .p.guide_normal }}</string>
+				<key>activeGuide</key>
+				<string>{{ .p.guide_active }}</string>
+				<key>stackGuide</key>
+				<string>{{ .p.guide_normal }}</string>
+				<key>invisibles</key>
+				<string>{{ .p.guide_normal }}</string>
+				<key>findHighlight</key>
+				<string>{{ .p.special }}</string>
+				<key>findHighlightForeground</key>
+				<string>{{ .p.on_special }}</string>
+			</dict>
+		</dict>
+{{- $p := .p -}}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Comment" "scope" "comment, punctuation.definition.comment" "fg" $p.comment "style" "italic") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Variable" "scope" "variable" "fg" $p.fg "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Member variable" "scope" "variable.member, meta.object-literal.key" "fg" $p.tag "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Function argument" "scope" "variable.parameter" "fg" $p.lsp_parameter "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Language variable" "scope" "variable.language" "fg" $p.func "style" "italic") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "String" "scope" "string, constant.other.symbol" "fg" $p.string "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Regex and escapes" "scope" "string.regexp, constant.character.escape" "fg" $p.regexp "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Number" "scope" "constant.numeric" "fg" $p.constant "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Built-in constant" "scope" "constant.language" "fg" $p.constant "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "User-defined constant" "scope" "constant.character, constant.other" "fg" $p.constant "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Keyword" "scope" "keyword - keyword.operator, keyword.operator.word" "fg" $p.keyword "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Operator" "scope" "keyword.operator" "fg" $p.operator "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Storage" "scope" "storage, storage.type" "fg" $p.keyword "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Punctuation" "scope" "punctuation.separator, punctuation.terminator, punctuation.section" "fg" $p.fg "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Accessor" "scope" "punctuation.accessor" "fg" $p.operator "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Function name" "scope" "entity.name.function, variable.function" "fg" $p.func "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Entity name" "scope" "entity.name - (entity.name.section | entity.name.tag | entity.name.label)" "fg" $p.entity "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Inherited class" "scope" "entity.other.inherited-class" "fg" $p.entity "style" "underline") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Tag" "scope" "entity.name.tag, meta.tag.sgml" "fg" $p.entity "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Tag attribute" "scope" "entity.other.attribute-name" "fg" $p.func "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Library function" "scope" "support.function, support.macro" "fg" $p.func "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Library constant" "scope" "support.constant" "fg" $p.constant "style" "italic") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Library class/type" "scope" "support.type, support.class" "fg" $p.entity "style" "italic") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Invalid" "scope" "invalid" "fg" $p.error "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Error message" "scope" "message.error" "fg" $p.error "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Diff header" "scope" "meta.diff, meta.diff.header" "fg" $p.func "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup heading" "scope" "markup.heading" "fg" $p.keyword "style" "bold") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup link" "scope" "string.other.link, markup.underline.link" "fg" $p.tag "style" "underline") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup italic" "scope" "markup.italic" "fg" "" "style" "italic") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup bold" "scope" "markup.bold" "fg" "" "style" "bold") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup code" "scope" "markup.raw, markup.raw.inline" "fg" $p.special "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup blockquote" "scope" "markup.quote" "fg" $p.accent "style" "italic") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup list bullet" "scope" "markup.list.numbered.bullet, markup.list punctuation.definition.list_item" "fg" $p.vcs_added "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup separator" "scope" "meta.separator" "fg" $p.comment "style" "bold") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup inserted" "scope" "markup.inserted, markup.inserted.git_gutter" "fg" $p.vcs_added "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup changed" "scope" "markup.changed, markup.changed.git_gutter" "fg" $p.vcs_modified "style" "") }}
+{{- template "yazi-tmtheme-scope.xml" (dict "name" "Markup deleted" "scope" "markup.deleted, markup.deleted.git_gutter" "fg" $p.vcs_removed "style" "") }}
+	</array>
+</dict>
+</plist>

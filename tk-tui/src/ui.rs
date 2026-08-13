@@ -3,8 +3,9 @@
 use crate::adf;
 use crate::app::{App, Mode};
 use crate::jira::Ticket;
+use crate::theme::theme;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
@@ -16,7 +17,7 @@ pub struct Segments {
 }
 
 fn dim() -> Style {
-    Style::default().fg(Color::DarkGray)
+    Style::default().fg(theme().dim)
 }
 
 pub fn build(t: &Ticket) -> Segments {
@@ -25,16 +26,16 @@ pub fn build(t: &Ticket) -> Segments {
     lines.push(Line::from(vec![
         Span::styled(
             t.key.clone(),
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme().key).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(t.itype.clone(), dim()),
         Span::raw("  "),
-        Span::styled(t.status.clone(), Style::default().fg(Color::Yellow)),
+        Span::styled(t.status.clone(), Style::default().fg(theme().status)),
     ]));
     lines.push(Line::styled(
         t.summary.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
+        Style::default().fg(theme().fg).add_modifier(Modifier::BOLD),
     ));
     lines.push(Line::default());
 
@@ -57,7 +58,7 @@ pub fn build(t: &Ticket) -> Segments {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("◆ {}", c.author),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme().author).add_modifier(Modifier::BOLD),
             ),
             Span::styled(format!("  {}", c.created), dim()),
         ]));
@@ -100,7 +101,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     let mut lines = app.segs.lines.clone();
     if let Some(s) = app.sel {
         if let Some(&h) = app.segs.comment_headers.get(s) {
-            lines[h].style = lines[h].style.add_modifier(Modifier::REVERSED);
+            lines[h].style = lines[h]
+                .style
+                .bg(theme().selection)
+                .fg(theme().inverted);
         }
     }
     f.render_widget(
@@ -121,7 +125,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         };
         let mut text: Vec<Line> = app.input.split('\n').map(Line::raw).collect();
         if let Some(last) = text.last_mut() {
-            last.spans.push(Span::styled("▌", Style::default().fg(Color::Cyan)));
+            last.spans.push(Span::styled("▌", Style::default().fg(theme().accent)));
         }
         // keep the last lines visible in the fixed-height box
         let inner_h = chunks[1].height.saturating_sub(2) as usize;
@@ -133,7 +137,7 @@ pub fn draw(f: &mut Frame, app: &App) {
                 Block::default()
                     .borders(Borders::ALL)
                     .title(title)
-                    .border_style(Style::default().fg(Color::Cyan)),
+                    .border_style(Style::default().fg(theme().accent)),
             ),
             chunks[1],
         );
@@ -141,11 +145,104 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // footer: status flash or key hints
     let footer = match &app.status {
-        Some(s) => Line::styled(format!(" {s}"), Style::default().fg(Color::Yellow)),
+        Some(s) => Line::styled(format!(" {s}"), Style::default().fg(theme().status)),
         None => Line::styled(
             " j/k scroll · u/d ½page · gg/G · J/K comment · r refresh · c comment · R reply · w web · q quit",
             dim(),
         ),
     };
     f.render_widget(Paragraph::new(footer), chunks[2]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jira::Comment;
+    use serde_json::json;
+
+    fn ticket() -> Ticket {
+        Ticket {
+            key: "FRD-123".into(),
+            summary: "a summary".into(),
+            status: "In Progress".into(),
+            itype: "Task".into(),
+            description: Some(json!({ "type": "doc", "content": [
+                { "type": "paragraph", "content": [
+                    { "type": "text", "text": "inline", "marks": [{ "type": "code" }] },
+                    { "type": "text", "text": "linked", "marks": [{ "type": "link" }] }
+                ]},
+                { "type": "codeBlock", "content": [{ "type": "text", "text": "let x = 1;" }] },
+                { "type": "rule" }
+            ]})),
+            comments: vec![Comment {
+                author: "Ada".into(),
+                created: "2026-08-01 11:41".into(),
+                body: json!({ "type": "doc", "content": [] }),
+            }],
+        }
+    }
+
+    fn find(segs: &Segments, needle: &str) -> Span<'static> {
+        segs.lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .find(|s| s.content.contains(needle))
+            .unwrap_or_else(|| panic!("no span containing {needle:?}"))
+            .clone()
+    }
+
+    /// `Line::styled` carries its colour on the line, not on the inner span.
+    fn find_line(segs: &Segments, needle: &str) -> Line<'static> {
+        segs.lines
+            .iter()
+            .find(|l| line_text(l).contains(needle))
+            .unwrap_or_else(|| panic!("no line containing {needle:?}"))
+            .clone()
+    }
+
+    #[test]
+    fn header_and_comment_styles_come_from_the_theme() {
+        let segs = build(&ticket());
+        let th = theme();
+
+        let header = &segs.lines[0];
+        assert_eq!(header.spans[0].content, "FRD-123");
+        assert_eq!(header.spans[0].style.fg, Some(th.key));
+        assert!(header.spans[0].style.add_modifier.contains(Modifier::BOLD));
+
+        let status = header.spans.last().unwrap();
+        assert_eq!(status.content, "In Progress");
+        assert_eq!(status.style.fg, Some(th.status));
+
+        let author_row = &segs.lines[segs.comment_headers[0]];
+        assert_eq!(author_row.spans[0].style.fg, Some(th.author));
+        // the timestamp beside it stays quiet
+        assert_eq!(author_row.spans[1].style.fg, Some(th.dim));
+    }
+
+    #[test]
+    fn adf_marks_come_from_the_theme() {
+        let segs = build(&ticket());
+        let th = theme();
+
+        assert_eq!(find(&segs, "inline").style.fg, Some(th.code_inline));
+        assert_eq!(find(&segs, "linked").style.fg, Some(th.link));
+        assert_eq!(find(&segs, "let x = 1;").style.fg, Some(th.code));
+        assert_eq!(find_line(&segs, "────────").style.fg, Some(th.rule));
+        // the "── N comments ──" divider is the quiet colour, not the rule colour
+        assert_eq!(find_line(&segs, "comment ──").style.fg, Some(th.dim));
+    }
+
+    /// The pane must never paint a backdrop, or WezTerm's
+    /// window_background_opacity can't show through — the same trap nvim hit.
+    #[test]
+    fn nothing_in_the_body_paints_a_background() {
+        let segs = build(&ticket());
+        for (i, line) in segs.lines.iter().enumerate() {
+            assert_eq!(line.style.bg, None, "line {i} paints a background");
+            for span in &line.spans {
+                assert_eq!(span.style.bg, None, "a span on line {i} paints a background");
+            }
+        }
+    }
 }

@@ -1,4 +1,8 @@
 # TO DO
+- ctrl s in ticket pane interferes
+- dash colours
+
+
 (empty — next ideas land here)
 
 ## Future direction (tk-tui)

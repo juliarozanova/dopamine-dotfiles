@@ -27,7 +27,14 @@ layout {
                     // Team-managed (next-gen) projects don't list sprints via
                     // `jira sprint list`, so lead with your open assigned issues
                     // (always useful) and only try the sprint view as a bonus.
-                    args "-lc" "[ -f ~/.config/jira-board/env ] && . ~/.config/jira-board/env; { echo '── my open issues ──'; jira issue list -q 'assignee = currentUser() AND statusCategory != Done' --plain --columns key,status,summary 2>&1; echo; echo '── current sprint (if any) ──'; jira sprint list --current --plain 2>&1; } | less -R"
+                    //
+                    // Section headers are bold + ANSI cyan, which WezTerm maps to
+                    // the palette's `tag` teal (see wezterm.lua's ANSI slots). Using
+                    // an ANSI index rather than a baked-in hex means the headers
+                    // follow the terminal into light mode for free, the way stock
+                    // zellij chrome does. `tput` keeps it terminfo-correct, and
+                    // emits nothing when TERM is dumb.
+                    args "-lc" "[ -f ~/.config/jira-board/env ] && . ~/.config/jira-board/env; b=$(tput bold)$(tput setaf 6); r=$(tput sgr0); { echo ${b}'── my open issues ──'${r}; jira issue list -q 'assignee = currentUser() AND statusCategory != Done' --plain --columns key,status,summary 2>&1; echo; echo ${b}'── current sprint (if any) ──'${r}; jira sprint list --current --plain 2>&1; } | less -R"
                 }
             }
             pane stacked=true {

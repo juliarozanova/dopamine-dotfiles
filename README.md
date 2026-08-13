@@ -47,6 +47,41 @@ npm install -g @anthropic-ai/claude-code
 On apt-based WSL, most of the above exist via `apt`/`brew` on Linux;
 zellij and yazi are easiest from their GitHub release binaries or `cargo`.
 
+## Applying changes — the chezmoi loop
+
+`~/.config/chezmoi/chezmoi.toml` points chezmoi's source at this working tree:
+
+```toml
+sourceDir = "/Users/julia/dopamine-dotfiles"
+```
+
+so **the repo you edit is the one `chezmoi apply` renders** — no commit-then-pull
+step, and no second copy under `~/.local/share/chezmoi` drifting out of sync.
+(That's chezmoi's default source dir; without this setting, edits here quietly
+don't apply.) On a fresh machine `install.sh` does the same thing via
+`--source`.
+
+```sh
+chezmoi diff                                  # what would change, as a patch
+chezmoi status                                # one line per differing file
+chezmoi apply                                 # write everything
+chezmoi apply ~/.config/wezterm/wezterm.lua   # …or one target
+```
+
+Nothing is live until you `apply` — editing `palette.toml` alone changes
+nothing on disk.
+
+If a target has changed since chezmoi last wrote it — including a file chezmoi
+has never written, like a config you'd been hand-editing — `apply` stops and asks
+rather than clobbering it. When you do mean to take the repo's version:
+`chezmoi apply --force <target>`.
+
+One thing happens on apply beyond writing files:
+`run_onchange_before_20-build-tk-tui.sh.tmpl` re-runs `cargo install` whenever
+tk-tui's sources change. (`.chezmoiexternal.toml` declares no externals — it's
+just a commented-out recipe for vendoring the colorscheme, so nothing is
+fetched.)
+
 ## tk — command reference
 
 | command | what it does |
@@ -66,8 +101,11 @@ In the fzf pickers: `ctrl-j/k` move, `ctrl-d/u` half-page, `ctrl-f/b` page.
 
 If Jira ever returns nothing ("No result found"), it's almost always an
 expired API token — `tk doctor` will tell you and print the regeneration
-steps. The token lives in `~/.config/jira-board/env` (single source of
-truth; every tk entry point sources it).
+steps. The token lives in `~/.config/jira-board/env`, which tk sources on
+every run so a refreshed token beats a stale `JIRA_API_TOKEN` inherited from a
+long-lived zellij server. Keep your shell rc in step too, and
+`zellij kill-all-sessions` afterwards so existing panes pick it up — `tk doctor`
+spells out both.
 
 ## The daily loop
 
@@ -129,32 +167,141 @@ paper https://arxiv.org/abs/2410.20672
 Everything — papers, ticket learnings, HDL practices — is one grep/telescope
 surface.
 
-## The scheme 🎨 — dopamine.nvim, everywhere
+## The scheme 🎨 — one palette, everywhere
 
 All colours live in **`.chezmoidata/palette.toml`** — edit → `chezmoi apply`
-→ the zellij theme (tabs, ribbon, frames) re-renders. It's ported straight from
-[dopamine.nvim](https://github.com/juliarozanova/dopamine.nvim)'s
-`colors.lua`: the **dark** variant is active, with **mirage** and **light**
-as commented blocks below it — swap a block, apply, done. Notable mapping:
-session badge = copper accent, active tab = raspberry, and ANSI blue is
-your slate keyword colour so blue-hungry TUIs (lazygit branches, fzf
-pointers) stay in-vibe instead of shouting cyan.
+→ **everything below re-renders from it**. Nothing downstream holds its own
+hexes:
 
-**nvim** — keep installing the scheme through your plugin manager:
+| generated file | what reads it |
+|---|---|
+| `.config/nvim/lua/dopamine_palette.lua` | passed to the dopamine colorscheme as its `palette` option |
+| `.config/wezterm/wezterm.lua` | `Dopamine Dark` / `Dopamine Light` schemes + ANSI slots |
+| `.config/zellij/themes/dopamine.kdl` | ribbon, tabs, frames, tables, lists |
+| `.config/tk/theme.json` | `tk view` — the ratatui ticket pane |
+| `.config/gh-dash/config.yml` | the dash's `⇅ pull requests` pane |
+| `.config/yazi/flavors/dopamine-{dark,light}.yazi/` | the dash's `🗀 files` pane, flavour + preview tmTheme |
+
+Three variants ship as real tables — **`dark`** (everyday), **`light`**, and
+**`mirage`** (ayu-flavoured). nvim carries all three; WezTerm ships dark and
+light and follows macOS appearance. zellij can't ask the OS anything, so its
+`dopamine` theme is an alias for whichever `[theme] variant` you select —
+`dopamine-dark`/`-light`/`-mirage` are all emitted too, so `theme
+"dopamine-light"` in `config.kdl` is an equivalent switch. Full rules in
+[Switching dark ⇄ light](#switching-dark--light).
+
+Role names are the colorscheme's own semantic slots (`accent`, `keyword`,
+`panel_bg`, `vcs_added`…) rather than an ANSI-ish palette, because that's what
+the highlight groups are written against. Notable mapping: session badge =
+copper `accent`, active tab = raspberry `constant`, and ANSI blue is your slate
+`keyword` so blue-hungry TUIs (lazygit branches, fzf pointers) stay in-vibe
+instead of shouting cyan. The few ANSI slots with no semantic equivalent live in
+palette.toml as `term_*` tints.
+
+**Transparency.** WezTerm runs at `window_background_opacity = 0.8`, which only
+blends cells carrying *no* explicit background — and it doesn't count "explicit
+bg that happens to equal the scheme bg" as unset ([wezterm#1425][wz]). So a TUI
+painting its own backdrop stays an opaque rectangle. Dropping
+`text_background_opacity` would fix nvim but wash out every deliberate
+background elsewhere (lazygit, btop, `ls`), so it stays at `1.0` and nvim opts
+out on its side instead: the colorscheme's `transparent = true` clears the bg on
+`Normal`/`NormalFloat`/`SignColumn`/`FoldColumn`/`WinSeparator`, leaving
+`CursorLine`, `Pmenu` and `StatusLine` solid so highlights stay readable.
+
+[wz]: https://github.com/wezterm/wezterm/issues/1425
+
+**tk-tui + the dash.** `tk view` reads `~/.config/tk/theme.json` at startup and
+maps palette roles onto the pane — `constant` for the ticket key, `special` for
+status, `tag` for comment authors, `accent` for the compose border and caret.
+Variant precedence is `$TK_THEME_VARIANT` → macOS appearance → `[theme] variant`
+→ dark, so it follows light/dark like WezTerm and nvim do. Every field falls back
+to a compiled-in dopamine-dark value, so `cargo install` on a bare machine still
+looks right. Like nvim, it paints **no** backdrop, so the terminal's
+transparency shows through — there's a test asserting no span ever sets a
+background.
+
+In the dash, `gh dash` takes its `theme.colors` from the palette (it has no
+light/dark switching, so it follows `[theme] variant`). The `◷ my issues` pane
+colours its section headers with an **ANSI index** rather than a baked-in hex —
+WezTerm maps ANSI cyan to the palette's `tag`, so those headers follow the
+terminal into light mode for free.
+
+**yazi** ships both flavours (`dopamine-dark` / `dopamine-light`) and picks
+between them from the terminal background on its own. Each is generated from one
+shared body in `.chezmoitemplates/`, plus a `tmtheme.xml` whose scope→role
+mapping mirrors the Neovim colorscheme — so a file previewed in yazi is coloured
+the way the same file looks open in nvim.
+
+A light variant can't just re-run the dark substitutions. Dark uses `bg` as the
+*foreground* for text on its marker/mode chips (dark ink on bright chips); flip
+to light and that becomes near-white on mid-tone pastels — every one of the 20
+fg/bg pairs failed WCAG, the worst at 1.7:1. Hence the `on_*` roles in
+palette.toml: the ink to use when a role is a *background*. Dark and mirage set
+them to `bg` (so dark renders exactly as before), while light uses a near-black —
+except on the terracotta `markup`, which is dark enough to want white instead.
+The four remaining sub-3:1 pairs in light are accent-coloured text on the page,
+the same trade dopamine-light already makes in nvim.
+
+**nvim** — the scheme is a local checkout, wired up in
+`dot_config/nvim/lua/plugins/colorscheme.lua`:
 
 ```lua
--- lazy.nvim
-{ "juliarozanova/dopamine.nvim",
+{ "juliarozanova/dopamine-light", dir = "~/Dashboard/Code/dopamine-light",
   lazy = false, priority = 1000,
-  config = function() vim.cmd.colorscheme("dopamine") end },
+  config = function()
+    local ok, palette = pcall(require, "dopamine_palette")
+    require("dopamine").setup({ transparent = true, palette = ok and palette or nil })
+  end },
 -- lualine: require('lualine').setup({ options = { theme = 'dopamine' } })
 ```
 
-`chezmoi apply` also drops a fresh reference copy of your `colors.lua` at
-`~/.config/zellij/themes/dopamine-colors-reference.lua` so the exact hexes
-are always one `:e` away when tweaking the palette. Your terminal emulator
-scheme (Windows Terminal / WezTerm / kitty) can join via another
-`.chezmoiexternal.toml` entry once you pick where that file lives.
+The `pcall` means the plugin still works standalone on its built-in colours if
+`dopamine_palette.lua` isn't there yet (fresh machine, or nvim config used
+without chezmoi).
+
+### Switching dark ⇄ light
+
+Most of the stack follows **System Settings → Appearance** by itself. Flip the
+macOS toggle and it changes live — no `chezmoi apply`, no restart:
+
+| | how it notices |
+|---|---|
+| WezTerm | `window-config-reloaded` + `get_appearance()` |
+| Neovim | polls `defaults read -g AppleInterfaceStyle` (`lua/config/autocmds.lua`) |
+| yazi | asks the terminal for its background colour |
+| tk-tui | reads the appearance at startup — each `tk view` is a fresh process |
+
+Two can't ask the OS anything, so they follow `[theme] variant` in
+`.chezmoidata/palette.toml`:
+
+```toml
+[theme]
+variant = "light"     # dark | light | mirage
+```
+
+```sh
+chezmoi apply
+```
+
+…then restart them: **zellij** reads its theme at session start, and **gh dash**
+its config at launch. Zellij also gets `dopamine-dark` / `-light` / `-mirage`
+emitted as named themes, so editing `theme "dopamine-light"` in `config.kdl` is
+an equivalent switch.
+
+So `variant` is *not* a global light switch — it moves those two and nothing
+else. Setting it to `light` while macOS sits in dark mode is a legitimate
+combination, not a mistake: zellij's chrome and the PR pane go light inside an
+otherwise dark session. To move the whole stack, flip macOS **and** set
+`variant` to match.
+
+`mirage` is the odd one out: nvim has it (`:colorscheme dopamine-mirage`), and
+zellij / gh-dash / tk-tui will render it via `variant`, but WezTerm only ships
+dark and light — so the terminal underneath stays on whichever the OS says.
+
+> **Gap worth knowing:** the autocmd that makes nvim follow the OS lives in
+> `~/.config/nvim/lua/config/autocmds.lua`, which chezmoi does **not** manage —
+> only `colorscheme.lua` and `dopamine_palette.lua` are. A fresh machine gets the
+> colorscheme but not the automatic switching until that file is copied over too.
 
 ## Anatomy
 
@@ -168,10 +315,15 @@ scheme (Windows Terminal / WezTerm / kitty) can join via another
 | `dot_local/share/tk/summary-prompt.md` | the prompt `tk done` pipes into `claude -p` |
 | `dot_config/zellij/templates/ticket.kdl.tpl.tmpl` | per-ticket layout (`$TICKET` baked by tk at open) |
 | `dot_config/zellij/layouts/dash.kdl.tmpl` | home layout — plain `zellij` lands here |
-| `.chezmoidata/palette.toml` | 🎨 the one file to retheme everything |
-
-`tk-tui` colours come from the terminal's ANSI palette, so it inherits the
-dopamine scheme (and any future light/dark switch) for free.
+| `.chezmoidata/palette.toml` | 🎨 every colour, all three variants — the one file to edit |
+| `dot_config/wezterm/wezterm.lua.tmpl` | terminal schemes + ANSI slots, generated from the palette |
+| `dot_config/nvim/lua/dopamine_palette.lua.tmpl` | the palette as a Lua table, injected into the colorscheme |
+| `dot_config/tk/theme.json.tmpl` | the palette as JSON, read by tk-tui at startup |
+| `dot_config/gh-dash/config.yml.tmpl` | gh-dash settings + palette-driven `theme.colors` |
+| `tk-tui/src/theme.rs` | role → colour mapping, with compiled-in dopamine-dark fallbacks |
+| `dot_config/yazi/` | `theme.toml` + both flavour dirs (thin wrappers over the shared templates) |
+| `.chezmoitemplates/yazi-flavor.toml` | shared yazi flavour body, rendered once per variant |
+| `.chezmoitemplates/yazi-tmtheme.xml` | shared preview tmTheme, scopes mapped like the nvim scheme |
 
 Optional zellij keybinding for a floating ticket pane from anywhere
 (add inside the `keybinds { shared_except "locked" { … } }` block):

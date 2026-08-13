@@ -1,0 +1,23 @@
+{{/*
+  One tmTheme scope entry. Included by yazi-tmtheme.xml — kept in its own file
+  because chezmoi parses each .chezmoitemplates file separately, so a `define`
+  nested inside another template's body isn't registered.
+  Expects: .name, .scope, .fg (may be empty), .style (may be empty).
+*/ -}}
+		<dict>
+			<key>name</key>
+			<string>{{ .name }}</string>
+			<key>scope</key>
+			<string>{{ .scope }}</string>
+			<key>settings</key>
+			<dict>
+{{- if .fg }}
+				<key>foreground</key>
+				<string>{{ .fg }}</string>
+{{- end }}
+{{- if .style }}
+				<key>fontStyle</key>
+				<string>{{ .style }}</string>
+{{- end }}
+			</dict>
+		</dict>
