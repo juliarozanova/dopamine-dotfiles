@@ -101,9 +101,9 @@ fetched.)
 browser, **esc** back to the checklist if you came from it, `q` close.
 
 **Inside the checklist** (`tk todo`, or `t` in the ticket TUI): `j/k` move,
-`J/K` jump group, **space** tick, **i** edit text, **o** new item in the
-group you're on — including a ticket with no checkboxes yet, which is how you
-start one — **dd** delete, **p** promote a local item onto a ticket,
+`J/K` jump group, **space** tick, **i** edit text, **o** new item below the one
+you're on, at its depth — and on a ticket with no checkboxes yet, which is how
+you start one — **tab**/**⇧tab** indent and outdent, **dd** delete, **p** promote a local item onto a ticket,
 **⏎** open the ticket you're on — the full ticket pane, from an item or from
 the group heading — **esc** back to the list, **r** refresh, `q` close.
 
@@ -125,6 +125,12 @@ Two places, and only two:
 - **`~/Dashboard/todo.md`** — plain markdown `- [ ]` lines, for work with no
   ticket. Prose and headings around them are yours; only checkbox lines are
   ever rewritten, so the file stays something you'd happily open in nvim.
+
+Items can be **nested**, to any depth. Jira's action items nest natively and
+`todo.md` uses two spaces per level, so indentation is a first-class part of
+both formats rather than something tk layers on top — indent something in the
+browser and the pane shows it, indent it with **tab** here and the ticket has
+it. Outdenting brings an item's sub-items with it.
 
 **Checkboxes outside the `TODO` heading are ignored on purpose** — acceptance
 criteria, a checklist in the notes, whatever a colleague added. They still show

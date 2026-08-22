@@ -213,6 +213,76 @@ mod live {
         println!("q quits");
     }
 
+    /// Tab/⇧Tab against the real Jira: indent an item, confirm the ticket's
+    /// own description nests it, then put it back.
+    #[test]
+    #[ignore = "writes to a real Jira ticket"]
+    fn tab_indents_an_item_in_the_real_ticket() {
+        let key = std::env::var("TK_TEST_ISSUE").unwrap_or_else(|_| "JROZ-1".into());
+        let cfg = crate::rest::config().expect("config");
+
+        // give the ticket two items to work with
+        let doc = jira::fetch_description(&cfg, &key).expect("fetch");
+        let (doc, first) = jira::add(doc.as_ref(), "tk indent test — parent");
+        let (doc, second) = jira::insert_after(&doc, &first, "tk indent test — child")
+            .expect("insert");
+        jira::save_description(&cfg, &key, &doc).expect("seed");
+
+        let mut v = TodoView::new().expect("view");
+        let flat = v
+            .list
+            .groups
+            .iter()
+            .find(|g| g.key.as_deref() == Some(key.as_str()))
+            .expect("group")
+            .items
+            .iter()
+            .find(|i| i.text.ends_with("child"))
+            .expect("the child item")
+            .depth;
+        assert_eq!(flat, 0, "starts flat");
+
+        // put the cursor on it and press Tab
+        let nth = v
+            .list
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .position(|i| i.text.ends_with("child"))
+            .expect("position");
+        v.list.cursor = nth;
+        v.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), 20);
+        for _ in 0..100 {
+            v.tick();
+            if v.list.pending() == 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_eq!(v.list.pending(), 0, "the write never landed");
+        println!("status: {:?}", v.list.status);
+
+        // ask Jira
+        let after = jira::fetch_description(&cfg, &key)
+            .expect("refetch")
+            .expect("a doc");
+        let items = jira::items(&key, &after);
+        let child = items
+            .iter()
+            .find(|i| i.text.ends_with("child"))
+            .expect("child still there");
+        assert_eq!(child.depth, 1, "Jira has it nested; items: {items:?}");
+        println!("indented in {key}: depth {}", child.depth);
+
+        // clean up both
+        let mut doc = after;
+        for id in [&first, &second] {
+            doc = jira::remove(&doc, id).unwrap_or(doc);
+        }
+        jira::save_description(&cfg, &key, &doc).expect("cleanup");
+        println!("cleaned up");
+    }
+
     #[test]
     #[ignore = "writes to a real Jira ticket"]
     fn adds_to_an_empty_ticket_through_the_keys_you_actually_press() {

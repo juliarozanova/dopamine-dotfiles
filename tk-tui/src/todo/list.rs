@@ -17,7 +17,9 @@ use ratatui::Frame;
 /// What an in-progress edit becomes when it commits.
 enum Target {
     Existing(usize),
-    New(usize),
+    /// (group, depth) — a new item inherits the nesting of the one you were
+    /// standing on, so `o` under a sub-item keeps you in that sub-list.
+    New(usize, usize),
 }
 
 struct Edit {
@@ -206,9 +208,13 @@ impl ItemList {
         let Some(gi) = self.group_at_cursor() else {
             return;
         };
+        let depth = self
+            .at(self.cursor)
+            .map(|(g, i)| self.groups[g].items[i].depth)
+            .unwrap_or(0);
         self.editing = Some(Edit {
             editor: Editor::new("", EditMode::Insert),
-            target: Target::New(gi),
+            target: Target::New(gi, depth),
             text: String::new(),
         });
     }
@@ -233,7 +239,7 @@ impl ItemList {
                 } else {
                     match edit.target {
                         Target::Existing(nth) => self.commit_text(nth, &text),
-                        Target::New(gi) => self.commit_new(gi, &text),
+                        Target::New(gi, depth) => self.commit_new(gi, depth, &text),
                     }
                 }
             }
@@ -274,11 +280,20 @@ impl ItemList {
         }
     }
 
-    fn commit_new(&mut self, gi: usize, text: &str) {
+    fn commit_new(&mut self, gi: usize, depth: usize, text: &str) {
+        // where the cursor is, so the new item lands next to it rather than at
+        // the end of the group
+        let after = self.at(self.cursor);
         match self.groups[gi].key.clone() {
             None => {
+                let after_line = after.and_then(|(g, i)| {
+                    match self.groups[g].items[i].origin {
+                        Origin::Local { line } if g == gi => Some(line),
+                        _ => None,
+                    }
+                });
                 let Some(local) = self.local.as_mut() else { return };
-                let line = local.insert(text);
+                let line = local.insert_at(text, after_line, Some(depth));
                 match local.save() {
                     Ok(()) => {
                         self.refresh_local();
@@ -295,8 +310,59 @@ impl ItemList {
             Some(key) => {
                 // No optimistic row: the item has no localId until Jira mints
                 // one, so it appears on the reload that follows.
-                self.queue(Op::Add { key, text: text.to_string() });
+                let after_id = after.and_then(|(g, i)| {
+                    match &self.groups[g].items[i].origin {
+                        Origin::Jira { local_id, .. } if g == gi => Some(local_id.clone()),
+                        _ => None,
+                    }
+                });
+                self.queue(Op::Add {
+                    key,
+                    text: text.to_string(),
+                    after: after_id,
+                });
                 self.status = Some(format!("adding “{text}”…"));
+            }
+        }
+    }
+
+    /// Indent or outdent the item under the cursor. Both backends can express
+    /// nesting, so this is the same gesture whichever one the item lives in.
+    pub fn shift_item(&mut self, deeper: bool) {
+        let Some((gi, ii)) = self.at(self.cursor) else {
+            return;
+        };
+        let depth = self.groups[gi].items[ii].depth;
+        if !deeper && depth == 0 {
+            self.status = Some("already at the outer level".into());
+            return;
+        }
+        if deeper && (ii == 0 || self.groups[gi].items[ii - 1].depth < depth) {
+            self.status = Some("nothing above it to nest under".into());
+            return;
+        }
+        match self.groups[gi].items[ii].origin.clone() {
+            Origin::Local { line } => {
+                let Some(local) = self.local.as_mut() else { return };
+                let delta = if deeper { 1 } else { -1 };
+                let before = depth;
+                if local.shift(line, delta).is_some() {
+                    match local.save() {
+                        Ok(()) => {
+                            self.groups[gi].items[ii].depth =
+                                (before as i32 + delta).max(0) as usize
+                        }
+                        Err(e) => {
+                            self.local.as_mut().expect("checked").shift(line, -delta);
+                            self.status = Some(format!("{e:#}"));
+                        }
+                    }
+                }
+            }
+            Origin::Jira { key, local_id } => {
+                self.groups[gi].items[ii].depth =
+                    (depth as i32 + if deeper { 1 } else { -1 }).max(0) as usize;
+                self.push_jira(gi, ii, Op::Shift { key, local_id, deeper });
             }
         }
     }
@@ -504,6 +570,8 @@ impl ItemList {
                 }
             }
             (KeyCode::Char('o'), false) => self.new_item(),
+            (KeyCode::Tab, _) => self.shift_item(true),
+            (KeyCode::BackTab, _) => self.shift_item(false),
             (KeyCode::Char('p'), false) => self.promote(),
             (KeyCode::Char('d'), false) => {
                 if d {
@@ -548,11 +616,12 @@ impl ItemList {
                 },
                 None => render::Editing::None,
             },
-            Target::New(gi) => render::Editing::New {
+            Target::New(gi, depth) => render::Editing::New {
                 gi,
                 text: &e.text,
                 cursor,
                 insert,
+                depth,
             },
         }
     }
@@ -606,7 +675,7 @@ impl ItemList {
         } else if self.picking() {
             " j/k choose ticket · ⏎ move it there · esc cancel"
         } else {
-            " j/k move · space done · i edit · o new · dd delete · p promote · ⏎ open ticket · r refresh · q quit"
+            " j/k move · space done · i edit · o new · tab/⇧tab indent · dd delete · p promote · ⏎ open ticket · q quit"
         };
         match self.in_flight {
             0 => base.to_string(),
@@ -626,7 +695,7 @@ mod tests {
     use ratatui::crossterm::event::KeyEvent;
 
     fn item(text: &str, origin: Origin) -> TodoItem {
-        TodoItem { text: text.into(), done: false, origin, dirty: false }
+        TodoItem { text: text.into(), done: false, origin, dirty: false, depth: 0 }
     }
 
     fn list() -> ItemList {
@@ -900,6 +969,7 @@ mod render_tests {
             done: false,
             origin: Origin::Local { line },
             dirty: false,
+            depth: 0,
         }
     }
 
@@ -1078,6 +1148,62 @@ mod render_tests {
         assert!(
             highlighted(&mut l).unwrap().contains("nothing yet"),
             "the placeholder row is where the cursor sits"
+        );
+    }
+
+    #[test]
+    fn nesting_is_visible_on_screen() {
+        let mut l = ItemList::new(None);
+        let mut mk = |t: &str, d: usize| {
+            let mut i = item(t, 0);
+            i.depth = d;
+            i
+        };
+        l.groups = vec![TodoGroup {
+            title: "no ticket".into(),
+            key: None,
+            items: vec![mk("top", 0), mk("child", 1), mk("grandchild", 2)],
+        }];
+        let screen = render(&mut l);
+        let col = |needle: &str| {
+            screen
+                .iter()
+                .find(|r| r.contains(needle))
+                .map(|r| r.chars().position(|c| c == '☐').unwrap())
+                .unwrap()
+        };
+        assert!(col("child") > col("top"), "a child is indented past its parent");
+        assert!(col("grandchild") > col("child"), "and so on down");
+    }
+
+    #[test]
+    fn a_new_item_is_typed_at_the_depth_it_will_have() {
+        let mut l = ItemList::new(None);
+        let mut nested = item("child", 1);
+        nested.depth = 1;
+        l.groups = vec![TodoGroup {
+            title: "no ticket".into(),
+            key: None,
+            items: vec![item("top", 0), nested],
+        }];
+        l.cursor = 1;
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        l.key(key('o'), 14);
+        for c in "sibling".chars() {
+            l.key(key(c), 14);
+        }
+        let screen = render(&mut l);
+        // columns, not bytes: the edit marker ❯ is three bytes and one column
+        let col = |needle: &str| {
+            screen
+                .iter()
+                .find(|r| r.contains(needle))
+                .map(|r| r.chars().position(|c| c == '☐').unwrap())
+        };
+        assert_eq!(
+            col("sibling"),
+            col("child"),
+            "the buffer sits where the item will, not at the margin"
         );
     }
 

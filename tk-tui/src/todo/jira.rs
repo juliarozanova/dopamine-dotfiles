@@ -100,14 +100,24 @@ pub fn section_range(doc: &Value) -> Option<std::ops::Range<usize>> {
     Some(start + 1..end)
 }
 
-/// Walk `taskItem`s in document order, calling `f` with each.
-fn walk_task_items<'a>(node: &'a Value, f: &mut impl FnMut(&'a Value)) {
+/// Walk `taskItem`s in document order with their nesting level.
+///
+/// In ADF a nested list is a `taskList` sitting *beside* the items it belongs
+/// under, inside the parent `taskList` — so depth is the count of enclosing
+/// task lists, not of enclosing items.
+fn walk_task_items<'a>(node: &'a Value, depth: usize, f: &mut impl FnMut(&'a Value, usize)) {
     if node["type"] == "taskItem" {
-        f(node);
+        f(node, depth);
+        return;
     }
+    let deeper = if node["type"] == "taskList" {
+        depth + 1
+    } else {
+        depth
+    };
     if let Some(kids) = node["content"].as_array() {
         for k in kids {
-            walk_task_items(k, f);
+            walk_task_items(k, deeper, f);
         }
     }
 }
@@ -150,7 +160,8 @@ pub fn items(key: &str, doc: &Value) -> Vec<TodoItem> {
     let nodes = top(doc);
     let mut out = Vec::new();
     for n in &nodes[range] {
-        walk_task_items(n, &mut |t| {
+        // the section's own task list is level 1, and its items are depth 0
+        walk_task_items(n, 0, &mut |t, depth| {
             out.push(TodoItem {
                 text: item_text(t),
                 done: item_done(t),
@@ -159,6 +170,7 @@ pub fn items(key: &str, doc: &Value) -> Vec<TodoItem> {
                     local_id: item_local_id(t),
                 },
                 dirty: false,
+                depth: depth.saturating_sub(1),
             });
         });
     }
@@ -263,15 +275,166 @@ pub fn remove(doc: &Value, local_id: &str) -> Result<Value> {
     Ok(out)
 }
 
+/// Where an item lives: the path from the document root to the `taskList`
+/// holding it, plus its index within that list.
+///
+/// Returned as indices rather than a `&mut` because the callers need the
+/// list *and* its parent, which a borrow of one can't give you.
+fn locate(node: &Value, local_id: &str) -> Option<(Vec<usize>, usize)> {
+    fn walk(node: &Value, local_id: &str, path: &mut Vec<usize>) -> Option<usize> {
+        if node["type"] == "taskList" {
+            if let Some(at) = node["content"]
+                .as_array()
+                .and_then(|kids| kids.iter().position(|k| item_local_id(k) == local_id))
+            {
+                return Some(at);
+            }
+        }
+        let kids = node["content"].as_array()?;
+        for (i, k) in kids.iter().enumerate() {
+            path.push(i);
+            if let Some(at) = walk(k, local_id, path) {
+                return Some(at);
+            }
+            path.pop();
+        }
+        None
+    }
+    let mut path = Vec::new();
+    walk(node, local_id, &mut path).map(|at| (path, at))
+}
+
+fn value_at_mut<'a>(root: &'a mut Value, path: &[usize]) -> Option<&'a mut Value> {
+    let mut cur = root;
+    for i in path {
+        cur = cur.get_mut("content")?.as_array_mut()?.get_mut(*i)?;
+    }
+    Some(cur)
+}
+
+fn kids_at_mut<'a>(root: &'a mut Value, path: &[usize]) -> Option<&'a mut Vec<Value>> {
+    value_at_mut(root, path)?
+        .get_mut("content")?
+        .as_array_mut()
+}
+
+/// Drop task lists left childless by a move — ADF forbids them and Jira
+/// rejects the whole document with a bare INVALID_INPUT.
+fn prune_empty_lists(node: &mut Value) {
+    let Some(kids) = node.get_mut("content").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for k in kids.iter_mut() {
+        prune_empty_lists(k);
+    }
+    kids.retain(|k| {
+        k["type"] != "taskList" || k["content"].as_array().is_some_and(|c| !c.is_empty())
+    });
+}
+
+fn new_item(text: &str) -> (Value, String) {
+    let local_id = new_local_id();
+    (
+        json!({
+            "type": "taskItem",
+            "attrs": { "localId": local_id, "state": "TODO" },
+            "content": [{ "type": "text", "text": text }],
+        }),
+        local_id,
+    )
+}
+
+fn gone() -> anyhow::Error {
+    anyhow::anyhow!("that item is no longer in the ticket — press r to refresh")
+}
+
+/// Insert a new item directly below `after_id`, as its sibling — so a new item
+/// keeps the nesting of the one you were standing on.
+pub fn insert_after(doc: &Value, after_id: &str, text: &str) -> Result<(Value, String)> {
+    let mut out = doc.clone();
+    let (path, at) = locate(&out, after_id).ok_or_else(gone)?;
+    let (item, id) = new_item(text);
+    kids_at_mut(&mut out, &path).ok_or_else(gone)?.insert(at + 1, item);
+    Ok((out, id))
+}
+
+fn node_at<'a>(root: &'a Value, path: &[usize]) -> Option<&'a Value> {
+    let mut cur = root;
+    for i in path {
+        cur = cur["content"].as_array()?.get(*i)?;
+    }
+    Some(cur)
+}
+
+/// Lift an item out of `list` together with its children.
+///
+/// A taskItem's children are the `taskList` sitting immediately after it, so
+/// the two move as a unit — outdenting a parent must not strand its sub-items
+/// behind it in the list it just left.
+fn take_unit(list: &mut Vec<Value>, at: usize) -> Vec<Value> {
+    let mut unit = vec![list.remove(at)];
+    if list.get(at).is_some_and(|n| n["type"] == "taskList") {
+        unit.push(list.remove(at));
+    }
+    unit
+}
+
+/// Move an item, and anything nested under it, one level deeper or shallower.
+///
+/// ADF nests by putting a `taskList` *beside* the items it belongs under,
+/// inside the parent list. So indenting moves the unit into the list that
+/// follows its predecessor, and outdenting lifts it out and drops it after that
+/// list in the grandparent.
+pub fn shift(doc: &Value, local_id: &str, deeper: bool) -> Result<Value> {
+    let mut out = doc.clone();
+    let (path, at) = locate(&out, local_id).ok_or_else(gone)?;
+
+    if deeper {
+        if at == 0 {
+            anyhow::bail!("nothing above it to nest under");
+        }
+        let list = kids_at_mut(&mut out, &path).ok_or_else(gone)?;
+        let unit = take_unit(list, at);
+        // after the removal the predecessor's own sub-list, if it has one,
+        // sits at at-1; otherwise `at` is where a new one belongs
+        match list.get_mut(at - 1).filter(|n| n["type"] == "taskList") {
+            Some(sub) => match sub.get_mut("content").and_then(Value::as_array_mut) {
+                Some(kids) => kids.extend(unit),
+                None => sub["content"] = Value::Array(unit),
+            },
+            None => list.insert(
+                at,
+                json!({ "type": "taskList", "attrs": { "localId": new_local_id() },
+                        "content": unit }),
+            ),
+        }
+    } else {
+        // outdenting is only meaningful when the containing list is itself
+        // inside a task list; at the section's own list there is nowhere to go
+        let Some((&sub_at, parent_path)) = path.split_last() else {
+            anyhow::bail!("already at the outer level");
+        };
+        let parent_path = parent_path.to_vec();
+        let parent_is_list =
+            node_at(&out, &parent_path).is_some_and(|n| n["type"] == "taskList");
+        if !parent_is_list {
+            anyhow::bail!("already at the outer level");
+        }
+        let list = kids_at_mut(&mut out, &path).ok_or_else(gone)?;
+        let unit = take_unit(list, at);
+        let parent = kids_at_mut(&mut out, &parent_path).ok_or_else(gone)?;
+        for (n, node) in unit.into_iter().enumerate() {
+            parent.insert(sub_at + 1 + n, node);
+        }
+    }
+    prune_empty_lists(&mut out);
+    Ok(out)
+}
+
 /// Append an item to the TODO section, creating the heading and task list if
 /// the ticket doesn't have them yet. Returns the new doc and the item's id.
 pub fn add(doc: Option<&Value>, text: &str) -> (Value, String) {
-    let local_id = new_local_id();
-    let item = json!({
-        "type": "taskItem",
-        "attrs": { "localId": local_id, "state": "TODO" },
-        "content": [{ "type": "text", "text": text }],
-    });
+    let (item, local_id) = new_item(text);
 
     let mut out = match doc {
         Some(d) if d["type"] == "doc" => d.clone(),
@@ -288,11 +451,9 @@ pub fn add(doc: Option<&Value>, text: &str) -> (Value, String) {
     if let Some(range) = section_range(&out) {
         let end = range.end;
         let nodes = out["content"].as_array_mut().expect("set above");
-        if let Some(list) = nodes[range]
-            .iter_mut()
-            .rev()
-            .find(|n| n["type"] == "taskList")
-        {
+        // the section's own top-level list — `rev()` would find a *nested*
+        // one and quietly bury the new item inside it
+        if let Some(list) = nodes[range].iter_mut().find(|n| n["type"] == "taskList") {
             match list.get_mut("content").and_then(Value::as_array_mut) {
                 Some(kids) => kids.push(item),
                 None => list["content"] = json!([item]),
@@ -533,6 +694,156 @@ mod tests {
         let before = json!({ "type": "doc", "version": 1, "content": [heading(2, "TODO")] });
         let (after, _) = add(Some(&before), "first thing");
         assert_eq!(items("K", &after).len(), 1);
+    }
+
+    /// Jira accepts and round-trips nested task lists (verified against a real
+    /// instance, three levels deep), so depth has to survive extraction.
+    fn nested() -> Value {
+        json!({ "type": "doc", "version": 1, "content": [
+            heading(2, "TODO"),
+            { "type": "taskList", "attrs": { "localId": "tl0" }, "content": [
+                task("p1", "TODO", "parent one"),
+                { "type": "taskList", "attrs": { "localId": "tl1" }, "content": [
+                    task("c1", "TODO", "child of one"),
+                    { "type": "taskList", "attrs": { "localId": "tl2" }, "content": [
+                        task("g1", "TODO", "grandchild")
+                    ]}
+                ]},
+                task("p2", "TODO", "parent two")
+            ]}
+        ]})
+    }
+
+    #[test]
+    fn depth_comes_out_of_the_nesting() {
+        let got: Vec<_> = items("K", &nested())
+            .into_iter()
+            .map(|i| (i.text, i.depth))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("parent one".to_string(), 0),
+                ("child of one".to_string(), 1),
+                ("grandchild".to_string(), 2),
+                ("parent two".to_string(), 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn indenting_moves_an_item_under_the_one_above_it() {
+        let after = shift(&nested(), "p2", true).unwrap();
+        let got: Vec<_> = items("K", &after).into_iter().map(|i| (i.text, i.depth)).collect();
+        assert_eq!(got[3], ("parent two".to_string(), 1), "now a child");
+        assert_eq!(got[0], ("parent one".to_string(), 0), "the others don't move");
+        assert_eq!(got.len(), 4, "and nothing is lost");
+    }
+
+    #[test]
+    fn outdenting_lifts_an_item_and_keeps_document_order() {
+        let after = shift(&nested(), "c1", false).unwrap();
+        let got: Vec<_> = items("K", &after).into_iter().map(|i| (i.text, i.depth)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("parent one".to_string(), 0),
+                ("child of one".to_string(), 0),
+                ("grandchild".to_string(), 1),
+                ("parent two".to_string(), 0),
+            ],
+            "it lands after the list it came out of, not at the end"
+        );
+    }
+
+    #[test]
+    fn indent_then_outdent_returns_the_document_to_where_it_started() {
+        let before = nested();
+        let there = shift(&before, "p2", true).unwrap();
+        let back = shift(&there, "p2", false).unwrap();
+        assert_eq!(
+            items("K", &back)
+                .into_iter()
+                .map(|i| (i.text, i.depth))
+                .collect::<Vec<_>>(),
+            items("K", &before)
+                .into_iter()
+                .map(|i| (i.text, i.depth))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn the_first_item_has_nothing_to_nest_under() {
+        let e = shift(&nested(), "p1", true).unwrap_err().to_string();
+        assert!(e.contains("nothing above it"), "got: {e}");
+    }
+
+    #[test]
+    fn a_top_level_item_cannot_outdent() {
+        let e = shift(&nested(), "p1", false).unwrap_err().to_string();
+        assert!(e.contains("outer level"), "got: {e}");
+    }
+
+    /// Outdenting the only child empties its list, and ADF forbids a childless
+    /// taskList — Jira answers one with a bare INVALID_INPUT.
+    #[test]
+    fn a_list_emptied_by_a_move_is_removed() {
+        let after = shift(&nested(), "g1", false).unwrap();
+        let json = after.to_string();
+        assert!(!json.contains("tl2"), "the emptied list must go: {json}");
+        assert_eq!(items("K", &after).len(), 4);
+    }
+
+    #[test]
+    fn a_new_item_can_be_slotted_in_beside_a_sibling() {
+        let (after, id) = insert_after(&nested(), "c1", "a new sibling").unwrap();
+        let got: Vec<_> = items("K", &after).into_iter().map(|i| (i.text, i.depth)).collect();
+        assert_eq!(got[2], ("a new sibling".to_string(), 1), "same depth, right below");
+        assert_eq!(got.len(), 5);
+        assert!(insert_after(&nested(), "nope", "x").is_err());
+        assert!(!id.is_empty());
+    }
+
+    /// `add` used to take the *last* task list in the section, which with
+    /// nesting is a sub-list — quietly burying new items inside it.
+    #[test]
+    fn add_appends_to_the_sections_own_list_not_a_nested_one() {
+        let (after, _) = add(Some(&nested()), "top level please");
+        let got = items("K", &after);
+        assert_eq!(
+            (got.last().unwrap().text.as_str(), got.last().unwrap().depth),
+            ("top level please", 0)
+        );
+    }
+
+    /// Outdenting a parent must bring its sub-items with it, not strand them
+    /// in the list it just left.
+    #[test]
+    fn an_item_takes_its_children_with_it() {
+        // c1 owns the grandchild; lifting c1 out must lift g1 too
+        let after = shift(&nested(), "c1", false).unwrap();
+        let got: Vec<_> = items("K", &after).into_iter().map(|i| (i.text, i.depth)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("parent one".to_string(), 0),
+                ("child of one".to_string(), 0),
+                ("grandchild".to_string(), 1),
+                ("parent two".to_string(), 0),
+            ],
+            "the grandchild stays under its parent, one level shallower"
+        );
+    }
+
+    #[test]
+    fn indenting_into_a_sibling_that_already_has_children_joins_that_list() {
+        // p2 indents under p1, which already owns tl1
+        let after = shift(&nested(), "p2", true).unwrap();
+        let lists = after.to_string().matches("\"taskList\"").count();
+        assert_eq!(lists, 3, "no new list — it joins the existing one: {after}");
+        let got: Vec<_> = items("K", &after).into_iter().map(|i| (i.text, i.depth)).collect();
+        assert_eq!(got[3], ("parent two".to_string(), 1));
     }
 
     #[test]

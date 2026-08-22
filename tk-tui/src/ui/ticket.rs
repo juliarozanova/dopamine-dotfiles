@@ -360,6 +360,7 @@ mod render_tests {
                     local_id: "a1".into(),
                 },
                 dirty: false,
+                depth: 0,
             }],
         }];
         App {

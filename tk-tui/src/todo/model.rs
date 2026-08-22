@@ -22,6 +22,10 @@ pub struct TodoItem {
     pub origin: Origin,
     /// True between an optimistic local change and its write landing.
     pub dirty: bool,
+    /// Nesting level, 0 for a top-level item. Both backends can express this
+    /// natively — ADF task lists nest inside each other, and markdown indents —
+    /// so it survives a round trip in either direction.
+    pub depth: usize,
 }
 
 #[derive(Clone, Debug)]

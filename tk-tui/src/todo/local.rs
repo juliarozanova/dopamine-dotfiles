@@ -52,6 +52,11 @@ fn parse_checkbox(line: &str) -> Option<(usize, bool, &str)> {
     Some((indent, done, text))
 }
 
+/// Two spaces per level, the markdown convention. Indentation that doesn't
+/// divide evenly still round-trips, because edits reuse the line's own indent
+/// — only new items are written at a computed depth.
+pub const INDENT: usize = 2;
+
 fn render_checkbox(indent: usize, done: bool, text: &str) -> String {
     format!(
         "{}- [{}] {}",
@@ -99,11 +104,12 @@ impl LocalFile {
             .iter()
             .enumerate()
             .filter_map(|(i, l)| {
-                parse_checkbox(l).map(|(_, done, text)| TodoItem {
+                parse_checkbox(l).map(|(indent, done, text)| TodoItem {
                     text: text.to_string(),
                     done,
                     origin: Origin::Local { line: i },
                     dirty: false,
+                    depth: indent / INDENT,
                 })
             })
             .collect()
@@ -150,21 +156,45 @@ impl LocalFile {
     /// Insert a new unticked item after the last existing checkbox (so items
     /// stay together under whatever heading they're already under), or at the
     /// end of the file if there are none yet. Returns its line index.
-    pub fn insert(&mut self, text: &str) -> usize {
-        let after = self
-            .lines
-            .iter()
-            .rposition(|l| parse_checkbox(l).is_some())
-            .map(|i| i + 1)
-            .unwrap_or(self.lines.len());
-        let indent = self
+    /// Insert a new unticked item. `after_line` puts it directly below that
+    /// line (so `o` adds where you're standing); otherwise it goes after the
+    /// last checkbox, keeping items together. `depth` overrides the indent it
+    /// would otherwise inherit.
+    pub fn insert_at(
+        &mut self,
+        text: &str,
+        after_line: Option<usize>,
+        depth: Option<usize>,
+    ) -> usize {
+        let after = match after_line {
+            Some(l) if l < self.lines.len() => l + 1,
+            _ => self
+                .lines
+                .iter()
+                .rposition(|l| parse_checkbox(l).is_some())
+                .map(|i| i + 1)
+                .unwrap_or(self.lines.len()),
+        };
+        let inherited = self
             .lines
             .get(after.saturating_sub(1))
             .and_then(|l| parse_checkbox(l))
             .map(|(i, _, _)| i)
             .unwrap_or(0);
+        let indent = depth.map(|d| d * INDENT).unwrap_or(inherited);
         self.lines.insert(after, render_checkbox(indent, false, text));
         after
+    }
+
+    /// Re-indent a checkbox line by `delta` levels, clamped at the left margin.
+    /// Returns the new depth.
+    pub fn shift(&mut self, line: usize, delta: i32) -> Option<usize> {
+        let (indent, done, text) = self.lines.get(line).and_then(|l| parse_checkbox(l))?;
+        let depth = (indent / INDENT) as i32;
+        let next = (depth + delta).max(0) as usize;
+        let text = text.to_string();
+        self.lines[line] = render_checkbox(next * INDENT, done, &text);
+        Some(next)
     }
 
     /// True if the file on disk has moved on since we read it.
@@ -259,7 +289,7 @@ mod tests {
     #[test]
     fn insert_lands_after_the_last_checkbox_not_at_eof() {
         let mut f = file("- [ ] first\n- [ ] second\n\n## Notes\nprose");
-        let line = f.insert("third");
+        let line = f.insert_at("third", None, None);
         assert_eq!(line, 2);
         assert_eq!(f.lines[2], "- [ ] third");
         assert_eq!(f.lines.last().unwrap(), "prose");
@@ -268,12 +298,40 @@ mod tests {
     #[test]
     fn insert_into_a_file_with_no_checkboxes_appends() {
         let mut f = file("# Todo\n\nprose");
-        assert_eq!(f.insert("first"), 3);
+        assert_eq!(f.insert_at("first", None, None), 3);
         assert_eq!(f.lines[3], "- [ ] first");
     }
 
     /// The in-memory tests above cover the edit; this covers the bytes that
     /// actually hit the disk, including the trailing newline.
+    #[test]
+    fn depth_comes_from_the_indent_and_survives_a_round_trip() {
+        let f = file("- [ ] top\n  - [ ] child\n    - [x] grandchild\n- [ ] back to top");
+        let depths: Vec<_> = f.items().iter().map(|i| i.depth).collect();
+        assert_eq!(depths, vec![0, 1, 2, 0]);
+    }
+
+    #[test]
+    fn shifting_reindents_and_clamps_at_the_margin() {
+        let mut f = file("- [ ] top\n  - [ ] child");
+        assert_eq!(f.shift(1, -1), Some(0));
+        assert_eq!(f.lines[1], "- [ ] child");
+        assert_eq!(f.shift(1, -1), Some(0), "cannot go left of the margin");
+        assert_eq!(f.shift(1, 1), Some(1));
+        assert_eq!(f.lines[1], "  - [ ] child");
+        assert_eq!(f.shift(0, 1), Some(1), "indent is the caller's business");
+    }
+
+    #[test]
+    fn a_new_item_can_land_below_the_one_you_are_on_at_a_chosen_depth() {
+        let mut f = file("- [ ] first\n- [ ] second\n\n## Notes\nprose");
+        let line = f.insert_at("nested under first", Some(0), Some(1));
+        assert_eq!(line, 1);
+        assert_eq!(f.lines[1], "  - [ ] nested under first");
+        assert_eq!(f.lines[2], "- [ ] second", "nothing else moved");
+        assert_eq!(f.lines.last().unwrap(), "prose");
+    }
+
     #[test]
     fn a_real_round_trip_through_the_filesystem_only_changes_the_checkbox() {
         let path = std::env::temp_dir().join(format!("tk-tui-test-{}.md", std::process::id()));

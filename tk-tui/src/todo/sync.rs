@@ -33,9 +33,18 @@ pub enum Op {
         key: String,
         local_id: String,
     },
+    /// Move an item one nesting level deeper or shallower.
+    Shift {
+        key: String,
+        local_id: String,
+        deeper: bool,
+    },
     Add {
         key: String,
         text: String,
+        /// Insert directly below this item, keeping its nesting. None appends
+        /// to the section.
+        after: Option<String>,
     },
     /// Move a local item onto a ticket. Carries the local line so the caller
     /// can drop it *after* the write lands — never before.
@@ -51,6 +60,7 @@ impl Op {
         match self {
             Op::Done { key, .. } | Op::Text { key, .. } => key,
             Op::Delete { key, .. } | Op::Add { key, .. } => key,
+            Op::Shift { key, .. } => key,
             Op::Promote { key, .. } => key,
         }
     }
@@ -58,7 +68,7 @@ impl Op {
     pub fn local_id(&self) -> Option<&str> {
         match self {
             Op::Done { local_id, .. } | Op::Text { local_id, .. } => Some(local_id),
-            Op::Delete { local_id, .. } => Some(local_id),
+            Op::Delete { local_id, .. } | Op::Shift { local_id, .. } => Some(local_id),
             Op::Add { .. } | Op::Promote { .. } => None,
         }
     }
@@ -105,6 +115,12 @@ fn apply(op: &Op) -> Result<()> {
     let doc = jira::fetch_description(&cfg, op.key())?;
 
     let updated = match op {
+        Op::Add { text, after: Some(after), .. } => {
+            let doc = doc.ok_or_else(|| {
+                anyhow::anyhow!("the ticket has no description any more — press r to refresh")
+            })?;
+            jira::insert_after(&doc, after, text)?.0
+        }
         Op::Add { text, .. } | Op::Promote { text, .. } => jira::add(doc.as_ref(), text).0,
         _ => {
             let doc = doc.ok_or_else(|| {
@@ -122,6 +138,7 @@ fn apply(op: &Op) -> Result<()> {
                     jira::set_text(&doc, local_id, text)?
                 }
                 Op::Delete { .. } => jira::remove(&doc, local_id)?,
+                Op::Shift { deeper, .. } => jira::shift(&doc, local_id, *deeper)?,
                 Op::Add { .. } | Op::Promote { .. } => unreachable!("handled above"),
             }
         }

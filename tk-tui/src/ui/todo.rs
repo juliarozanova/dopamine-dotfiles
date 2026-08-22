@@ -55,6 +55,7 @@ pub enum Editing<'a> {
         text: &'a str,
         cursor: usize,
         insert: bool,
+        depth: usize,
     },
 }
 
@@ -79,8 +80,8 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
         sel: None,
         editing: false,
     };
-    let edit_row = |text: &str, cursor: usize, insert: bool| Row {
-        line: edit_line(text, cursor, insert),
+    let edit_row = |text: &str, cursor: usize, insert: bool, depth: usize| Row {
+        line: edit_line_at(text, cursor, insert, depth),
         sel: None,
         editing: true,
     };
@@ -132,7 +133,7 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
             // an item being reworded shows its buffer in its own place
             if let Editing::Existing { gi: g2, ii: i2, text, cursor, insert } = editing {
                 if g2 == gi && i2 == ii {
-                    out.push(edit_row(text, cursor, insert));
+                    out.push(edit_row(text, cursor, insert, it.depth));
                     continue;
                 }
             }
@@ -152,7 +153,7 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
             out.push(Row {
                 line: Line::from(vec![
                     gutter(it.dirty),
-                    Span::raw(" "),
+                    Span::raw(" ".repeat(1 + it.depth * 2)),
                     Span::styled(glyph.to_string(), glyph_style),
                     Span::raw(" "),
                     Span::styled(it.text.clone(), text_style),
@@ -163,9 +164,9 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
         }
 
         // a new item lands at the end of its group, as an extra row
-        if let Editing::New { text, cursor, insert, .. } = editing {
+        if let Editing::New { text, cursor, insert, depth, .. } = editing {
             if adding {
-                out.push(edit_row(text, cursor, insert));
+                out.push(edit_row(text, cursor, insert, depth));
             }
         }
     }
@@ -206,6 +207,13 @@ pub fn selectables(groups: &[TodoGroup]) -> Vec<Sel> {
 
 /// The row being edited: the buffer with a block caret at the cursor, plus a
 /// mode marker so you can see at a glance whether typing inserts or commands.
+pub fn edit_line_at(text: &str, cursor: usize, insert: bool, depth: usize) -> Line<'static> {
+    let mut line = edit_line(text, cursor, insert);
+    // keep the caret column lined up with the row it will become
+    line.spans.insert(1, Span::raw("  ".repeat(depth)));
+    line
+}
+
 pub fn edit_line(text: &str, cursor: usize, insert: bool) -> Line<'static> {
     let th = theme();
     let chars: Vec<char> = text.chars().collect();
@@ -251,6 +259,7 @@ mod tests {
             done,
             origin: Origin::Local { line: 0 },
             dirty: false,
+            depth: 0,
         }
     }
 

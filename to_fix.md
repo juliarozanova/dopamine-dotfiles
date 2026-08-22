@@ -87,6 +87,12 @@
     steps back to the global list. `q` closes the pane from anywhere — those
     two meanings used to share one key.
 
+13. Indented todos — items carry a depth, rendered as indentation, with
+    tab/⇧tab to indent and outdent. Native in both formats: ADF task lists
+    nest (verified three levels deep against real Jira) and markdown indents
+    two spaces per level. Outdenting takes an item's children with it, and a
+    list left childless by a move is dropped, since ADF forbids those.
+
 # Parked (theming — revisit later)
 7. Dash colour scheme?
 8. Light/dark from the single chezmoi palette?
