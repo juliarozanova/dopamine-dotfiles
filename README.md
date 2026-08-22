@@ -90,7 +90,7 @@ fetched.)
 | `tk` | fzf-pick one of your open Jira tickets, then open it |
 | `tk FRD-123` | open (create if needed) worktree + zellij session for a ticket |
 | `tk view [KEY] [--float]` | **the ticket TUI** (tk-tui) in this terminal; `--float` = zellij floating pane. KEY inferred from cwd → session name → picker. `tk tui` is an alias |
-| `tk todo [--float]` | **the global checklist**: the `TODO` section of every open assigned ticket, plus `~/Dashboard/todo.md`, in one editable list. `Alt-t` floats it from any session |
+| `tk todo` | **the global checklist**: the `TODO` section of every open assigned ticket, plus `~/Dashboard/todo.md`, in one editable list. `Alt-t` floats it from any session |
 | `tk done [KEY]` | Claude-summarise the branch work → confirm → post as Jira comment + log learnings |
 | `tk ls` | list ticket worktrees |
 | `tk doctor` | check dependencies **and live Jira auth** — run this first when anything misbehaves |
@@ -101,8 +101,8 @@ fetched.)
 browser, `q` quit.
 
 **Inside the checklist** (`tk todo`, or `t` in the ticket TUI): `j/k` move,
-`J/K` jump group, **space** tick, **i** edit text, **o**/**O** new item in
-the group you're in, **dd** delete, **p** promote a local item onto a ticket,
+`J/K` jump group, **space** tick, **i** edit text, **o** new item in the
+group you're in, **dd** delete, **p** promote a local item onto a ticket,
 **⏎** open the ticket an item belongs to, **r** refresh, `q` quit.
 
 **Editing text** anywhere in tk is modal — the same small vim in the
@@ -201,9 +201,12 @@ Pane movement is `Alt h/j/k/l`; `Ctrl h` is left free for nvim
   conversation *in that directory* — so each worktree keeps its own thread.
 - `r` in the ticket TUI re-pulls ticket text/comments. `t` swaps it for this
   ticket's checklist and back, keeping your place in the description.
-- `Alt-t` floats the global checklist over whatever you're doing; `q` closes
-  it, and stock `Alt-f` hides/shows the floating layer without closing it.
-  `tk ls` lists open worktrees.
+- `Alt-t` brings the global checklist up over whatever you're doing, and
+  `Alt-t` again puts it away. It's a floating pane the ticket layout declares
+  and hides at session start, so the key only ever shows and hides it — it
+  never opens a second copy, and stock `Alt-f` still governs the floating
+  layer as usual. On the dash the checklist is already a pane in the right
+  stack, so Alt-t has nothing to toggle there. `tk ls` lists open worktrees.
 - `Ctrl o w` (zellij session manager) is your ticket switcher; sessions
   survive reboots via session serialization.
 

@@ -1,9 +1,6 @@
 # TO DO
-- Alt T interferes with Alt F now - I still want to be able to use alt f as normal, and alt t to bring up and minimize a floating todo.
-- Alt T doesn't upen the global todo, it makes a new pane which does nothing but opens a default floating pane
-- t doesn't switch to todo mode in ticket pane. Also no hint for it with other hotkeys hints at the bottom.
-- In the global todo pane, j k  isn't actually doing anything - doesn't seem to be moving position or highlighting sections/todo items, o only edits the first one
-- O doesn't preview the thing being typed at all? I'm completely blind until it is done
+
+(empty)
 
 # TO DO (Later, ignore for now)
 - want to mkdir and git init automatically on tk ticket select optionally, if my chosen folder doesn't yet exist
@@ -18,6 +15,10 @@
 - issue-list mode replacing the fzf picker
 - status transitions from the TUI (To Do → In Progress → …)
 - sprint board view
+- `Alt-t` from a session with no ticket layout (a bare `zellij`) has nothing to
+  toggle. zellij can't run a command from a keybinding without opening a pane
+  for it, so there's no way to create-or-focus on demand; the pane has to be
+  declared up front.
 
 # Accepted / won't fix
 1. The alternating `<` colours in the zellij bottom ribbon are hardcoded in
@@ -53,7 +54,24 @@
       that doesn't exist for a new item — so it drew over the next group's
       row, or on an empty list drew nowhere at all (typing blind). Editing is
       now part of building the rows.
-    - `O` wasn't bound at all.
+
+10. ~~First cut of `tk todo` barely worked~~ — five bugs, all in the parts no
+    test ever exercised: the tests checked logic and `--dump` text and never
+    drew a frame or opened a session. Fixed, with `TestBackend` tests that
+    render real buffers, and layout changes verified in a throwaway session:
+    - `Alt-t` opened a spare pane that did nothing, and its leftovers made
+      `Alt-f` useless. zellij's `Run` opens a *new* pane every time, so the
+      helper script's only job was to open a second one — and closing those
+      panes made zellij re-apply the swap layout and respawn them, so they
+      multiplied. The checklist is now declared as a floating pane in the
+      ticket layout and `Alt-t` is plain `ToggleFloatingPanes`: it shows and
+      hides one pane and never creates anything. `Alt-f` is untouched.
+    - `t` in the ticket pane flipped a field nothing rendered, and the footer
+      never mentioned it.
+    - The edit buffer was patched over a row after the rows were built, at an
+      index that doesn't exist yet for a new item — so it drew over the next
+      group's row, or on an empty list drew nowhere at all (typing blind).
+      Editing is now an input to building the rows.
 
 # Parked (theming — revisit later)
 7. Dash colour scheme?

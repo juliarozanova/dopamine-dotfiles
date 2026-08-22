@@ -18,11 +18,13 @@ layout {
         }
     }
 
-    tab name="${TICKET}" cwd="${WORKTREE}" focus=true {
+    // hide_floating_panes: the checklist below exists from session start but
+    // stays out of the way until Alt-t asks for it.
+    tab name="${TICKET}" cwd="${WORKTREE}" focus=true hide_floating_panes=true {
         pane split_direction="vertical" {
             // ── main stage: nvim + lazygit stacked together ─────────
             pane size="62%" stacked=true {
-                pane name="nvim" command="nvim" expanded=true
+                pane name="nvim" command="nvim" focus=true expanded=true
                 pane name="⎇ lazygit" command="lazygit"
             }
             // ── the stack: expand what you need, rest fold to titles ─
@@ -34,6 +36,24 @@ layout {
                     args "view" "${TICKET}"
                 }
                 pane name="❯ shell"
+            }
+        }
+
+        // The checklist, ready for Alt-t. Declared here rather than spawned on
+        // the keypress: zellij's Run action opens a *new* pane every time it
+        // fires, so a keybinding that ran `tk todo` stacked another copy on
+        // every press until the floating layer was unusable.
+        //
+        // The `toggle-floating-panes` before `exec` is not a flourish — zellij
+        // focuses a layout-declared floating pane on tab creation and drops the
+        // tab's hide_floating_panes, and neither focus=true on a tiled pane nor
+        // focus=false here changes that. So the pane hides itself the moment it
+        // starts, then becomes the checklist. Net effect: nvim has focus, and
+        // tk-tui is already running behind the curtain when you first press
+        // Alt-t.
+        floating_panes {
+            pane name="☑ todo" command="bash" x="15%" y="7%" width="70%" height="85%" {
+                args "-lc" "zellij action toggle-floating-panes; exec tk todo"
             }
         }
     }

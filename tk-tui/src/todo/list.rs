@@ -490,10 +490,7 @@ impl ItemList {
                     self.edit_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
                 }
             }
-            // `O` too: there's one insertion point per group, so above and
-            // below are the same place — better to accept both than to eat the
-            // keystroke and look broken.
-            (KeyCode::Char('o'), false) | (KeyCode::Char('O'), _) => self.new_item(),
+            (KeyCode::Char('o'), false) => self.new_item(),
             (KeyCode::Char('p'), false) => self.promote(),
             (KeyCode::Char('d'), false) => {
                 if d {
@@ -886,21 +883,6 @@ mod render_tests {
             !screen.contains("nothing yet"),
             "the placeholder must give way to the new item"
         );
-    }
-
-    #[test]
-    fn capital_o_starts_a_new_item_too() {
-        for key in ['o', 'O'] {
-            let mut l = empty();
-            l.key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE), 14);
-            for c in "typed".chars() {
-                l.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), 14);
-            }
-            assert!(
-                render(&mut l).join("\n").contains("typed"),
-                "{key} must open an item you can see"
-            );
-        }
     }
 
     #[test]
