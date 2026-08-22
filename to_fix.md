@@ -88,7 +88,9 @@
     two meanings used to share one key.
 
 13. Indented todos — items carry a depth, rendered as indentation, with
-    tab/⇧tab to indent and outdent. Native in both formats: ADF task lists
+    `>>`/`<<` to indent and outdent, and `V` for a visual-line selection that
+    `j`/`k` drag and a single `>` shifts wholesale — vim's own split, where an
+    operator doubles in normal mode but fires once on a selection. Native in both formats: ADF task lists
     nest (verified three levels deep against real Jira) and markdown indents
     two spaces per level. Outdenting takes an item's children with it, and a
     list left childless by a move is dropped, since ADF forbids those.

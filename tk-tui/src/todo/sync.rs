@@ -221,7 +221,10 @@ mod tests {
 /// writes to a ticket. Run deliberately:
 ///
 ///   . ~/.config/jira-board/env
-///   cargo test --  --ignored --nocapture live_round_trip
+///   cargo test -- --ignored --test-threads=1 --nocapture
+///
+/// `--test-threads=1` matters: these share a ticket, and in parallel they
+/// clean up each other's fixtures.
 ///
 /// Set TK_TEST_ISSUE to point it somewhere other than JROZ-1.
 #[cfg(test)]
@@ -235,7 +238,10 @@ mod live {
     #[ignore = "writes to a real Jira ticket"]
     fn live_toggle_one_item() {
         let key = std::env::var("TK_TEST_ISSUE").unwrap_or_else(|_| "JROZ-2".into());
-        let id = std::env::var("TK_TEST_ITEM").expect("set TK_TEST_ITEM to a localId");
+        let Ok(id) = std::env::var("TK_TEST_ITEM") else {
+            println!("skipping: set TK_TEST_ITEM to a localId to run this one");
+            return;
+        };
         let cfg = rest::config().expect("config");
         let doc = jira::fetch_description(&cfg, &key).expect("fetch").expect("a doc");
         let was = jira::item_done(find(&doc, &id).expect("the item"));

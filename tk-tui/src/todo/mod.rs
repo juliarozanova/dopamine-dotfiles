@@ -139,6 +139,30 @@ mod live {
         v.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), 20);
     }
 
+    /// Put the cursor on the item whose text is exactly `text`.
+    ///
+    /// Two things this gets right that the obvious version doesn't. It walks
+    /// *cursor positions*, not items — an empty group is a position too, so a
+    /// flat index over items drifts out of step as soon as one ticket has no
+    /// checkboxes. And it matches the whole string: a substring match once
+    /// caught a real item of the user's ("Another one" ends with "one") and
+    /// indented it, which is exactly the kind of damage a live test must not
+    /// be able to do.
+    fn focus(v: &mut TodoView, text: &str) {
+        for n in 0..v.list.target_count() {
+            v.list.cursor = n;
+            if let Some((gi, ii)) = v.list.at(n) {
+                if v.list.groups[gi].items[ii].text == text {
+                    return;
+                }
+            }
+        }
+        panic!("{text:?} is not in the list");
+    }
+
+    /// A prefix nothing of the user's will collide with.
+    const TAG: &str = "tk-live-test";
+
     /// The full round trip: land on a ticket in the list, press enter, get the
     /// ticket pane, press esc, be back where you were.
     #[test]
@@ -213,19 +237,76 @@ mod live {
         println!("q quits");
     }
 
-    /// Tab/⇧Tab against the real Jira: indent an item, confirm the ticket's
-    /// own description nests it, then put it back.
+    /// A visual selection of several items, indented in one gesture, against
+    /// the real Jira — the case where the per-item writes could tread on each
+    /// other if they were applied in the wrong order.
     #[test]
     #[ignore = "writes to a real Jira ticket"]
-    fn tab_indents_an_item_in_the_real_ticket() {
-        let key = std::env::var("TK_TEST_ISSUE").unwrap_or_else(|_| "JROZ-1".into());
+    fn a_visual_selection_indents_together_in_the_real_ticket() {
+        let key = std::env::var("TK_TEST_ISSUE").unwrap_or_else(|_| "JROZ-2".into());
         let cfg = crate::rest::config().expect("config");
+        let (anchor, one, two) =
+            (format!("{TAG} anchor"), format!("{TAG} one"), format!("{TAG} two"));
+
+        // seed a parent and two siblings under it
+        let doc = jira::fetch_description(&cfg, &key).expect("fetch");
+        let (doc, a) = jira::add(doc.as_ref(), &anchor);
+        let (doc, b) = jira::insert_after(&doc, &a, &one).expect("b");
+        let (doc, c) = jira::insert_after(&doc, &b, &two).expect("c");
+        jira::save_description(&cfg, &key, &doc).expect("seed");
+
+        let mut v = TodoView::new().expect("view");
+
+        // V on the first sibling, drag down to the second, then a single `>`
+        focus(&mut v, &one);
+        press(&mut v, 'V');
+        press(&mut v, 'j');
+        press(&mut v, '>');
+        for _ in 0..150 {
+            v.tick();
+            if v.list.pending() == 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_eq!(v.list.pending(), 0, "writes never landed");
+        println!("status: {:?}", v.list.status);
+
+        let after = jira::fetch_description(&cfg, &key).expect("refetch").expect("doc");
+        let items = jira::items(&key, &after);
+        let depth = |text: &str| {
+            items
+                .iter()
+                .find(|i| i.text == text)
+                .unwrap_or_else(|| panic!("{text:?} gone"))
+                .depth
+        };
+        assert_eq!(depth(&anchor), 0, "the anchor stays put");
+        assert_eq!(depth(&one), 1, "both selected items nested");
+        assert_eq!(depth(&two), 1);
+        println!("anchor 0, one {}, two {}", depth(&one), depth(&two));
+
+        let mut doc = after;
+        for id in [&a, &b, &c] {
+            doc = jira::remove(&doc, id).unwrap_or(doc);
+        }
+        jira::save_description(&cfg, &key, &doc).expect("cleanup");
+        println!("cleaned up");
+    }
+
+    /// `>>` against the real Jira: indent an item, confirm the ticket's own
+    /// description nests it, then put it back.
+    #[test]
+    #[ignore = "writes to a real Jira ticket"]
+    fn double_angle_indents_an_item_in_the_real_ticket() {
+        let key = std::env::var("TK_TEST_ISSUE").unwrap_or_else(|_| "JROZ-2".into());
+        let cfg = crate::rest::config().expect("config");
+        let (parent, child) = (format!("{TAG} parent"), format!("{TAG} child"));
 
         // give the ticket two items to work with
         let doc = jira::fetch_description(&cfg, &key).expect("fetch");
-        let (doc, first) = jira::add(doc.as_ref(), "tk indent test — parent");
-        let (doc, second) = jira::insert_after(&doc, &first, "tk indent test — child")
-            .expect("insert");
+        let (doc, first) = jira::add(doc.as_ref(), &parent);
+        let (doc, second) = jira::insert_after(&doc, &first, &child).expect("insert");
         jira::save_description(&cfg, &key, &doc).expect("seed");
 
         let mut v = TodoView::new().expect("view");
@@ -237,21 +318,14 @@ mod live {
             .expect("group")
             .items
             .iter()
-            .find(|i| i.text.ends_with("child"))
+            .find(|i| i.text == child)
             .expect("the child item")
             .depth;
         assert_eq!(flat, 0, "starts flat");
 
-        // put the cursor on it and press Tab
-        let nth = v
-            .list
-            .groups
-            .iter()
-            .flat_map(|g| g.items.iter())
-            .position(|i| i.text.ends_with("child"))
-            .expect("position");
-        v.list.cursor = nth;
-        v.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), 20);
+        focus(&mut v, &child);
+        press(&mut v, '>');
+        press(&mut v, '>');
         for _ in 0..100 {
             v.tick();
             if v.list.pending() == 0 {
@@ -267,12 +341,12 @@ mod live {
             .expect("refetch")
             .expect("a doc");
         let items = jira::items(&key, &after);
-        let child = items
+        let moved = items
             .iter()
-            .find(|i| i.text.ends_with("child"))
+            .find(|i| i.text == child)
             .expect("child still there");
-        assert_eq!(child.depth, 1, "Jira has it nested; items: {items:?}");
-        println!("indented in {key}: depth {}", child.depth);
+        assert_eq!(moved.depth, 1, "Jira has it nested; items: {items:?}");
+        println!("indented in {key}: depth {}", moved.depth);
 
         // clean up both
         let mut doc = after;
@@ -287,7 +361,8 @@ mod live {
     #[ignore = "writes to a real Jira ticket"]
     fn adds_to_an_empty_ticket_through_the_keys_you_actually_press() {
         let key = std::env::var("TK_TEST_ISSUE").unwrap_or_else(|_| "JROZ-2".into());
-        let text = "tk-tui nav test — safe to delete";
+        let text = format!("{TAG} nav — safe to delete");
+        let text = text.as_str();
 
         let mut v = TodoView::new().expect("todo view");
         let gi = v

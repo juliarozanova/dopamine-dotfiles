@@ -103,7 +103,8 @@ browser, **esc** back to the checklist if you came from it, `q` close.
 **Inside the checklist** (`tk todo`, or `t` in the ticket TUI): `j/k` move,
 `J/K` jump group, **space** tick, **i** edit text, **o** new item below the one
 you're on, at its depth — and on a ticket with no checkboxes yet, which is how
-you start one — **tab**/**⇧tab** indent and outdent, **dd** delete, **p** promote a local item onto a ticket,
+you start one — **>>**/**<<** indent and outdent, **V** visual-line select (then `j`/`k` to
+drag it and a single **>** or **<** to shift the lot), **dd** delete, **p** promote a local item onto a ticket,
 **⏎** open the ticket you're on — the full ticket pane, from an item or from
 the group heading — **esc** back to the list, **r** refresh, `q` close.
 

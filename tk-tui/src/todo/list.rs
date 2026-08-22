@@ -54,6 +54,11 @@ pub struct ItemList {
     pub local: Option<LocalFile>,
     pending_g: bool,
     pending_d: bool,
+    /// A pending `>` or `<` waiting to be doubled, as in vim.
+    pending_shift: Option<char>,
+    /// Anchor of a visual-line selection. The selection runs between this and
+    /// the cursor, inclusive, the way `V` behaves in vim.
+    visual: Option<usize>,
     editing: Option<Edit>,
     /// Choosing a ticket to promote a local item into.
     picking: Option<(usize, usize)>, // (flat item index, highlighted group)
@@ -71,6 +76,8 @@ impl ItemList {
             local,
             pending_g: false,
             pending_d: false,
+            pending_shift: None,
+            visual: None,
             editing: None,
             picking: None,
             syncer: None,
@@ -83,6 +90,19 @@ impl ItemList {
     #[cfg(test)]
     pub fn pending(&self) -> usize {
         self.in_flight
+    }
+
+    pub fn visual(&self) -> bool {
+        self.visual.is_some()
+    }
+
+    /// The inclusive range the next operator applies to: the visual selection
+    /// if there is one, else just the cursor.
+    pub fn range(&self) -> (usize, usize) {
+        match self.visual {
+            Some(anchor) => (anchor.min(self.cursor), anchor.max(self.cursor)),
+            None => (self.cursor, self.cursor),
+        }
     }
 
     pub fn editing(&self) -> bool {
@@ -326,36 +346,62 @@ impl ItemList {
         }
     }
 
-    /// Indent or outdent the item under the cursor. Both backends can express
-    /// nesting, so this is the same gesture whichever one the item lives in.
-    pub fn shift_item(&mut self, deeper: bool) {
-        let Some((gi, ii)) = self.at(self.cursor) else {
-            return;
+    /// Indent or outdent everything in the current range — one item normally,
+    /// or the whole visual selection.
+    ///
+    /// Top to bottom on purpose: indenting settles each item under its
+    /// predecessor before the next one looks for its own, so a run of siblings
+    /// ends up in one sub-list rather than a staircase of them.
+    pub fn shift_range(&mut self, deeper: bool) {
+        let (from, to) = self.range();
+        let many = to > from;
+        let mut moved = 0;
+        let mut refused: Option<String> = None;
+        for nth in from..=to {
+            match self.shift_one(nth, deeper) {
+                Ok(()) => moved += 1,
+                Err(why) => {
+                    refused.get_or_insert(why);
+                }
+            }
+        }
+        self.visual = None;
+        self.status = match (moved, refused) {
+            (0, Some(why)) => Some(why),
+            (0, None) => Some("nothing to indent".into()),
+            (n, _) if many => {
+                Some(format!("{n} {}", if deeper { "indented" } else { "outdented" }))
+            }
+            _ => None,
+        };
+    }
+
+    /// Indent or outdent one item. Both backends can express nesting, so this
+    /// is the same gesture whichever one the item lives in.
+    fn shift_one(&mut self, nth: usize, deeper: bool) -> Result<(), String> {
+        let Some((gi, ii)) = self.at(nth) else {
+            return Err("nothing to indent".into());
         };
         let depth = self.groups[gi].items[ii].depth;
         if !deeper && depth == 0 {
-            self.status = Some("already at the outer level".into());
-            return;
+            return Err("already at the outer level".into());
         }
         if deeper && (ii == 0 || self.groups[gi].items[ii - 1].depth < depth) {
-            self.status = Some("nothing above it to nest under".into());
-            return;
+            return Err("nothing above it to nest under".into());
         }
         match self.groups[gi].items[ii].origin.clone() {
             Origin::Local { line } => {
-                let Some(local) = self.local.as_mut() else { return };
                 let delta = if deeper { 1 } else { -1 };
-                let before = depth;
-                if local.shift(line, delta).is_some() {
-                    match local.save() {
-                        Ok(()) => {
-                            self.groups[gi].items[ii].depth =
-                                (before as i32 + delta).max(0) as usize
-                        }
-                        Err(e) => {
-                            self.local.as_mut().expect("checked").shift(line, -delta);
-                            self.status = Some(format!("{e:#}"));
-                        }
+                let local = self.local.as_mut().ok_or("no local file")?;
+                local.shift(line, delta).ok_or("not a checkbox line")?;
+                match local.save() {
+                    Ok(()) => {
+                        self.groups[gi].items[ii].depth = (depth as i32 + delta).max(0) as usize;
+                        Ok(())
+                    }
+                    Err(e) => {
+                        self.local.as_mut().expect("checked").shift(line, -delta);
+                        Err(format!("{e:#}"))
                     }
                 }
             }
@@ -363,6 +409,7 @@ impl ItemList {
                 self.groups[gi].items[ii].depth =
                     (depth as i32 + if deeper { 1 } else { -1 }).max(0) as usize;
                 self.push_jira(gi, ii, Op::Shift { key, local_id, deeper });
+                Ok(())
             }
         }
     }
@@ -525,13 +572,40 @@ impl ItemList {
 
         let g = std::mem::take(&mut self.pending_g);
         let d = std::mem::take(&mut self.pending_d);
+        let shift_op = std::mem::take(&mut self.pending_shift);
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let half = (view_h / 2).max(1) as i32;
+
+        // `>`/`<`: one press indents the selection in visual mode, as in vim;
+        // doubled, it indents the item under the cursor.
+        if let KeyCode::Char(c @ ('>' | '<')) = k.code {
+            // a selection fires on the first press; without one it takes two
+            if self.visual.is_some() || shift_op == Some(c) {
+                self.shift_range(c == '>');
+            } else {
+                self.pending_shift = Some(c);
+            }
+            return ListAction::None;
+        }
 
         match (k.code, ctrl) {
             (KeyCode::Char('q'), _) => return ListAction::Quit,
             (KeyCode::Char('c'), true) => return ListAction::Quit,
-            (KeyCode::Esc, _) => return ListAction::Back,
+            // esc leaves the selection before it leaves the view
+            (KeyCode::Esc, _) => {
+                if self.visual.take().is_some() {
+                    return ListAction::None;
+                }
+                return ListAction::Back;
+            }
+
+            // visual-line selection: V anchors, j/k drag it
+            (KeyCode::Char('V'), _) | (KeyCode::Char('v'), false) => {
+                self.visual = match self.visual {
+                    Some(_) => None,
+                    None => Some(self.cursor),
+                };
+            }
 
             (KeyCode::Char('j'), false) | (KeyCode::Down, _) => self.move_cursor(1),
             (KeyCode::Char('k'), false) | (KeyCode::Up, _) => self.move_cursor(-1),
@@ -570,8 +644,6 @@ impl ItemList {
                 }
             }
             (KeyCode::Char('o'), false) => self.new_item(),
-            (KeyCode::Tab, _) => self.shift_item(true),
-            (KeyCode::BackTab, _) => self.shift_item(false),
             (KeyCode::Char('p'), false) => self.promote(),
             (KeyCode::Char('d'), false) => {
                 if d {
@@ -652,8 +724,21 @@ impl ItemList {
                 self.scroll = row_u + 1 - view_h;
             }
             if editing_row.is_none() {
-                if let Some(l) = lines.get_mut(row) {
-                    l.style = l.style.bg(th.selection).fg(th.inverted);
+                // the whole visual range is painted, not just the cursor row
+                let (from, to) = if self.picking.is_some() {
+                    (self.cursor, self.cursor)
+                } else {
+                    self.range()
+                };
+                let painted = if self.picking.is_some() {
+                    vec![row]
+                } else {
+                    (from..=to).filter_map(|n| render::row_of(&rows, n)).collect()
+                };
+                for r in painted {
+                    if let Some(l) = lines.get_mut(r) {
+                        l.style = l.style.bg(th.selection).fg(th.inverted);
+                    }
                 }
             }
         }
@@ -674,8 +759,10 @@ impl ItemList {
             " esc discard · ⏎/ZZ save · i insert · vim motions"
         } else if self.picking() {
             " j/k choose ticket · ⏎ move it there · esc cancel"
+        } else if self.visual() {
+            " ── VISUAL ── j/k extend · > indent · < outdent · esc cancel"
         } else {
-            " j/k move · space done · i edit · o new · tab/⇧tab indent · dd delete · p promote · ⏎ open ticket · q quit"
+            " j/k move · space done · i edit · o new · >>/<< indent · V select · dd delete · p promote · ⏎ open · q quit"
         };
         match self.in_flight {
             0 => base.to_string(),
@@ -834,6 +921,129 @@ mod tests {
         l.delete_item();
         l.promote();
         assert_eq!(l.in_flight, 0, "nothing may be written");
+    }
+
+    fn three_local() -> ItemList {
+        let mut l = ItemList::new(None);
+        l.groups = vec![TodoGroup {
+            title: "no ticket".into(),
+            key: None,
+            items: vec![
+                item("first", Origin::Local { line: 0 }),
+                item("second", Origin::Local { line: 1 }),
+                item("third", Origin::Local { line: 2 }),
+            ],
+        }];
+        l
+    }
+
+    /// vim: one `>` is a pending operator, the second one fires it.
+    #[test]
+    fn a_single_angle_bracket_waits_to_be_doubled() {
+        let mut l = three_local();
+        l.cursor = 1;
+        press(&mut l, '>');
+        assert_eq!(l.pending_shift, Some('>'), "armed, not fired");
+        assert_eq!(l.groups[0].items[1].depth, 0, "nothing has moved yet");
+
+        // an unrelated key disarms it, as in vim
+        press(&mut l, 'j');
+        assert_eq!(l.pending_shift, None);
+    }
+
+    #[test]
+    fn mismatched_brackets_do_not_fire() {
+        let mut l = three_local();
+        l.cursor = 1;
+        press(&mut l, '>');
+        press(&mut l, '<');
+        assert_eq!(l.pending_shift, Some('<'), "the second arms its own operator");
+        assert_eq!(l.groups[0].items[1].depth, 0);
+    }
+
+    #[test]
+    fn v_anchors_a_selection_that_j_and_k_drag() {
+        let mut l = three_local();
+        assert_eq!(l.range(), (0, 0), "no selection is just the cursor");
+
+        press(&mut l, 'V');
+        assert!(l.visual());
+        press(&mut l, 'j');
+        assert_eq!(l.range(), (0, 1));
+        press(&mut l, 'j');
+        assert_eq!(l.range(), (0, 2));
+        press(&mut l, 'k');
+        assert_eq!(l.range(), (0, 1));
+
+        // dragging upward from the anchor works too
+        let mut l = three_local();
+        l.cursor = 2;
+        press(&mut l, 'V');
+        press(&mut l, 'k');
+        assert_eq!(l.range(), (1, 2), "the range is ordered, whichever way you drag");
+    }
+
+    #[test]
+    fn esc_drops_the_selection_before_it_leaves_the_view() {
+        let mut l = three_local();
+        press(&mut l, 'V');
+        let act = l.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 20);
+        assert_eq!(act, ListAction::None, "the first esc only cancels the selection");
+        assert!(!l.visual());
+        let act = l.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 20);
+        assert_eq!(act, ListAction::Back, "the second leaves");
+    }
+
+    /// In visual mode a single `>` fires, exactly as vim does.
+    #[test]
+    fn one_angle_bracket_shifts_a_whole_selection() {
+        let mut l = three_local();
+        l.local = Some(
+            LocalFile::load_from(std::env::temp_dir().join(format!(
+                "tk-visual-{}.md",
+                std::process::id()
+            )))
+            .unwrap(),
+        );
+        // give the backing file matching lines so the shift can save
+        std::fs::write(
+            std::env::temp_dir().join(format!("tk-visual-{}.md", std::process::id())),
+            "- [ ] first\n- [ ] second\n- [ ] third\n",
+        )
+        .unwrap();
+        l.local = Some(
+            LocalFile::load_from(std::env::temp_dir().join(format!(
+                "tk-visual-{}.md",
+                std::process::id()
+            )))
+            .unwrap(),
+        );
+
+        l.cursor = 1;
+        press(&mut l, 'V');
+        press(&mut l, 'j');
+        assert_eq!(l.range(), (1, 2));
+        press(&mut l, '>');
+
+        assert!(!l.visual(), "the selection clears after the operator, as in vim");
+        assert_eq!(l.groups[0].items[1].depth, 1);
+        assert_eq!(l.groups[0].items[2].depth, 1, "both moved, not just the cursor");
+        assert_eq!(l.groups[0].items[0].depth, 0, "and nothing outside the range");
+        assert_eq!(l.status.as_deref(), Some("2 indented"));
+
+        std::fs::remove_file(
+            std::env::temp_dir().join(format!("tk-visual-{}.md", std::process::id())),
+        )
+        .ok();
+    }
+
+    #[test]
+    fn the_first_item_refuses_to_indent_and_says_why() {
+        let mut l = three_local();
+        press(&mut l, '>');
+        press(&mut l, '>');
+        assert_eq!(l.groups[0].items[0].depth, 0);
+        assert_eq!(l.status.as_deref(), Some("nothing above it to nest under"));
     }
 
     #[test]
@@ -1151,10 +1361,45 @@ mod render_tests {
         );
     }
 
+    /// A selection you can't see is a selection you can't trust.
+    #[test]
+    fn the_whole_visual_selection_is_painted() {
+        let mut l = populated();
+        let sel = crate::theme::theme().selection;
+        let rows_bg = |l: &mut ItemList| {
+            let mut term = Terminal::new(TestBackend::new(60, 14)).unwrap();
+            term.draw(|f| {
+                let area = f.area();
+                l.draw(f, area);
+            })
+            .unwrap();
+            let buf = term.backend().buffer().clone();
+            (0..buf.area.height)
+                .filter(|y| buf[(0, *y)].style().bg == Some(sel))
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                        .trim_end()
+                        .to_string()
+                })
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(rows_bg(&mut l).len(), 1, "just the cursor to start with");
+
+        l.key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::NONE), 14);
+        l.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), 14);
+        let painted = rows_bg(&mut l);
+        assert_eq!(painted.len(), 2, "both rows of the selection: {painted:?}");
+        assert!(painted[0].contains("first local"));
+        assert!(painted[1].contains("second local"));
+    }
+
     #[test]
     fn nesting_is_visible_on_screen() {
         let mut l = ItemList::new(None);
-        let mut mk = |t: &str, d: usize| {
+        let mk = |t: &str, d: usize| {
             let mut i = item(t, 0);
             i.depth = d;
             i
