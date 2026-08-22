@@ -212,6 +212,21 @@ mod live {
     use super::*;
     use crate::todo::jira;
 
+    /// Toggle one existing item and nothing else, so the description can be
+    /// diffed byte-for-byte either side of the write.
+    #[test]
+    #[ignore = "writes to a real Jira ticket"]
+    fn live_toggle_one_item() {
+        let key = std::env::var("TK_TEST_ISSUE").unwrap_or_else(|_| "JROZ-2".into());
+        let id = std::env::var("TK_TEST_ITEM").expect("set TK_TEST_ITEM to a localId");
+        let cfg = rest::config().expect("config");
+        let doc = jira::fetch_description(&cfg, &key).expect("fetch").expect("a doc");
+        let was = jira::item_done(find(&doc, &id).expect("the item"));
+        let next = jira::set_done(&doc, &id, !was).expect("toggle");
+        jira::save_description(&cfg, &key, &next).expect("save");
+        println!("toggled {id}: {was} -> {}", !was);
+    }
+
     #[test]
     #[ignore = "writes to a real Jira ticket"]
     fn live_round_trip_touches_only_the_item_it_owns() {
