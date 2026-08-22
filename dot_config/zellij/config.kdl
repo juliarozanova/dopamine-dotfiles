@@ -13,6 +13,13 @@ keybinds {
         bind "Alt l" { MoveFocusOrTab "right"; }
         bind "Alt j" { MoveFocus "down"; }
         bind "Alt k" { MoveFocus "up"; }
+
+        // Alt-t: the global checklist as a floating pane, from any session —
+        // including from inside a ticket. tk-todo-float toggles an existing
+        // pane rather than stacking a second copy. Stock zellij leaves Alt-t
+        // unbound (it uses Alt-n/f/[/]/+/-) and WezTerm defines no key table,
+        // so nothing else wants it.
+        bind "Alt t" { Run "tk-todo-float"; }
     }
 }
 

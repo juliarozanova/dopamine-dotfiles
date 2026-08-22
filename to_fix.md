@@ -1,5 +1,5 @@
 # TO DO
-- ctrl s in ticket pane interferes
+- want to mkdir and git init automatically on tk ticket select optionally, if my chosen folder doesn't yet exist
 - dash colours
 
 
@@ -9,6 +9,9 @@
 - issue-list mode replacing the fzf picker
 - status transitions from the TUI (To Do → In Progress → …)
 - sprint board view
+- nested checkboxes (ADF taskLists nest; the list flattens them)
+- ordering/priority in the global list — grouping by ticket stops scaling
+  somewhere north of ~20 open tickets
 
 # Accepted / won't fix
 1. The alternating `<` colours in the zellij bottom ribbon are hardcoded in
@@ -30,7 +33,16 @@
 7. lazygit stacked with neovim in the main stage
 8. Functional jira ticket pane (superseded by tk-tui)
 9. Dash "sprint" pane → "my issues" (team-managed projects have no sprint
-   list); hdl-inbox documented (tk done harvests #hdl lines → weekly prune)
+   list); ~~hdl-inbox documented~~ (superseded by 10 — the inbox is gone)
+10. Global todo tool — `tk todo` aggregates the `TODO` section of every open
+    assigned ticket plus `~/Dashboard/todo.md` into one editable list, writes
+    back to Jira surgically (the description is mutated in place, never
+    re-serialised), `p` promotes a local item onto a ticket, `Alt-t` floats it
+    anywhere, and the ticket pane gained a `t` TODO mode instead of a second
+    pane. The hdl inbox and the whole `#hdl` pipeline are gone with it.
+11. ~~ctrl s in ticket pane interferes~~ — the compose box now uses the same
+    modal editor as the checklist; `ZZ` sends, so nothing asks the terminal
+    for `ctrl-s` (which is XOFF flow control and never arrives).
 
 # Parked (theming — revisit later)
 7. Dash colour scheme?

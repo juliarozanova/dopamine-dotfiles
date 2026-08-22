@@ -1,5 +1,5 @@
 // dash — home base. Plain `zellij` lands here (default_layout).
-// Left stack: PRs + sprint. Right stack: knowledge inbox + files + shell.
+// Left stack: PRs + my issues. Right stack: todo + files + shell.
 //
 // Chrome is stock zellij: the built-in tab-bar (top) and status-bar keybind
 // ribbon (bottom), both coloured by the dopamine component theme. Pane frames
@@ -38,8 +38,11 @@ layout {
                 }
             }
             pane stacked=true {
-                pane name="⚑ hdl inbox" command="nvim" expanded=true {
-                    args "Knowledge/hdl/inbox.md"
+                // Every open ticket's TODO section plus ~/Dashboard/todo.md,
+                // editable in place. Alt-t floats the same view from anywhere,
+                // including from inside a ticket session.
+                pane name="☑ todo" command="tk" expanded=true {
+                    args "todo"
                 }
                 pane name="🗀 files" command="yazi"
                 pane name="❯ shell"

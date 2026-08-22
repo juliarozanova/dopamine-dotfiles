@@ -5,6 +5,7 @@
 #   tk              fzf-pick one of your open tickets, then open it
 #   tk FRD-123      open (create if needed) worktree + zellij session for a ticket
 #   tk view [KEY]   ticket TUI in this terminal (--float: zellij floating pane)
+#   tk todo         global checklist: every ticket's TODO section + ~/Dashboard/todo.md
 #   tk done [KEY]   summarise work via Claude, post as Jira comment, log learnings
 #   tk ls           list ticket worktrees
 #   tk doctor       check dependencies
@@ -18,9 +19,10 @@ STATE="${XDG_STATE_HOME:-$HOME/.local/state}/tk"
 MAP="$STATE/repo.map"                                  # "TICKET /path/to/repo" per line
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/tk/repos.conf" # "PREFIX /path/to/repo" per line
 SHARE="$HOME/.local/share/tk"
+TODO_PANE="☑ todo"   # also matched by tk-todo-float when deciding to toggle
 TPL="${XDG_CONFIG_HOME:-$HOME/.config}/zellij/templates/ticket.kdl.tpl"
 
-mkdir -p "$STATE" "$WORK" "$KNOW/tickets" "$KNOW/hdl"
+mkdir -p "$STATE" "$WORK" "$KNOW/tickets"
 
 # Prefer the on-disk token over a possibly-stale env snapshot: when tk runs in a
 # zellij pane forked from a long-lived server, the inherited JIRA_API_TOKEN can
@@ -95,10 +97,9 @@ write_claude_context() {
 We are working on Jira ticket **$t**: $sum
 
 - Ticket description and comments: run \`jira issue view $t --comments 10 --plain\`
-- HDL best practices live at: $KNOW/hdl/best-practices.md — follow them, and
-  flag when we discover something that should be added.
+- The ticket's own checklist lives under a \`TODO\` heading in its description;
+  \`tk todo\` edits it. Suggest items there rather than keeping your own list.
 - When we finish something notable, state it as a one-line learning.
-  Tag HDL-framework insights with #hdl so they get harvested by \`tk done\`.
 EOF
   fi
   # keep tk's context file out of accidental commits
@@ -179,8 +180,7 @@ cmd_done() {
   fi
 
   { printf '\n## %s\n\n%s\n' "$(date +%F)" "$summary"; } >> "$KNOW/tickets/$t.md"
-  printf '%s\n' "$summary" | grep -i '#hdl' >> "$KNOW/hdl/inbox.md" || true
-  echo "tk: logged → Knowledge/tickets/$t.md  (#hdl lines → Knowledge/hdl/inbox.md)"
+  echo "tk: logged → Knowledge/tickets/$t.md"
 }
 
 # tk view [KEY] [--float] — the ratatui ticket pane (tk-tui), runnable in any
@@ -212,13 +212,33 @@ cmd_view() {
   fi
 }
 
+# tk todo [--float] — the global checklist: the TODO section of every open
+# assigned ticket, plus ~/Dashboard/todo.md. --float spawns it as a zellij
+# floating pane (what Alt-t is bound to).
+cmd_todo() {
+  local float=0 a
+  for a in "$@"; do
+    case "$a" in
+      --float) float=1;;
+      *) die "tk todo: unknown argument $a (usage: tk todo [--float])";;
+    esac
+  done
+  command -v tk-tui >/dev/null 2>&1 \
+    || die "tk-tui not installed — run: chezmoi apply (builds it via cargo)"
+  if [[ $float -eq 1 && -n "${ZELLIJ:-}" ]]; then
+    zellij run --floating --width "70%" --height "85%" --name "$TODO_PANE" -- tk todo
+  else
+    exec tk-tui --todo
+  fi
+}
+
 cmd_ls() {
   find "$WORK" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
 }
 
 cmd_doctor() {
   local d ok=1
-  for d in git jira jq fzf zellij nvim lazygit claude envsubst glow yazi cargo tk-tui; do
+  for d in git jira jq fzf zellij nvim lazygit claude envsubst glow yazi cargo curl tk-tui; do
     if command -v "$d" >/dev/null 2>&1; then printf '  ✓ %s\n' "$d"
     else printf '  ✗ %s\n' "$d"; ok=0; fi
   done
@@ -251,9 +271,10 @@ cmd_doctor() {
 case "${1:-}" in
   done)    shift; cmd_done "$@";;
   view|tui) shift; cmd_view "$@";;
+  todo)    shift; cmd_todo "$@";;
   ls)      cmd_ls;;
   doctor)  cmd_doctor;;
-  -h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//';;
+  -h|--help|help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//';;
   "")      cmd_open;;
   *)       cmd_open "$1";;
 esac

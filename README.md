@@ -6,9 +6,9 @@ One Jira ticket = one git worktree = one zellij session = one Claude context.
 ~/Dashboard/
 ├── Code/         main checkouts (clone your repos here)
 ├── Work/         per-ticket worktrees (tk manages these)
+├── todo.md       work with no ticket of its own — `tk todo` edits it
 └── Knowledge/
     ├── papers/   `paper <arxiv-url>` drops notes + PDFs here
-    ├── hdl/      best-practices.md ← weekly prune ← inbox.md ← tk done
     └── tickets/  per-ticket learnings, appended by tk done
 ```
 
@@ -90,14 +90,26 @@ fetched.)
 | `tk` | fzf-pick one of your open Jira tickets, then open it |
 | `tk FRD-123` | open (create if needed) worktree + zellij session for a ticket |
 | `tk view [KEY] [--float]` | **the ticket TUI** (tk-tui) in this terminal; `--float` = zellij floating pane. KEY inferred from cwd → session name → picker. `tk tui` is an alias |
+| `tk todo [--float]` | **the global checklist**: the `TODO` section of every open assigned ticket, plus `~/Dashboard/todo.md`, in one editable list. `Alt-t` floats it from any session |
 | `tk done [KEY]` | Claude-summarise the branch work → confirm → post as Jira comment + log learnings |
 | `tk ls` | list ticket worktrees |
 | `tk doctor` | check dependencies **and live Jira auth** — run this first when anything misbehaves |
 
 **Inside the ticket TUI**: `j/k` scroll, `u/d` half-page, `gg`/`G`,
-`J/K` select comment, **r** refresh, **c** new comment, **R** reply
-(quotes the selected comment), **w** open in browser, `q` quit.
-In compose: `ctrl-s` send, `esc` cancel (draft kept).
+`J/K` select comment, **t** this ticket's TODO checklist, **r** refresh,
+**c** new comment, **R** reply (quotes the selected comment), **w** open in
+browser, `q` quit.
+
+**Inside the checklist** (`tk todo`, or `t` in the ticket TUI): `j/k` move,
+`J/K` jump group, **space** tick, **i** edit text, **o** new item,
+**dd** delete, **p** promote a local item onto a ticket, **⏎** open the
+ticket an item belongs to, **r** refresh, `q` quit.
+
+**Editing text** anywhere in tk is modal — the same small vim in the
+checklist and the comment box: `hjkl w b e 0 ^ $ f t` motions, `d`/`c` plus a
+motion, `x D C s`, `i a I A`, `u` undo. `⏎` (or `ZZ`) saves, `esc` from
+normal mode discards. Comments send with **ZZ**, not `ctrl-s` — `ctrl-s` is
+terminal flow control and never reaches the pane.
 In the fzf pickers: `ctrl-j/k` move, `ctrl-d/u` half-page, `ctrl-f/b` page.
 
 If Jira ever returns nothing ("No result found"), it's almost always an
@@ -142,7 +154,10 @@ Pane movement is `Alt h/j/k/l`; `Ctrl h` is left free for nvim
   integration links them to the ticket with zero effort.
 - The claude pane runs `claude --continue`, which resumes the most recent
   conversation *in that directory* — so each worktree keeps its own thread.
-- `r` in the ticket TUI re-pulls ticket text/comments. `tk ls` lists open worktrees.
+- `r` in the ticket TUI re-pulls ticket text/comments. `t` swaps it for this
+  ticket's checklist and back, keeping your place in the description.
+- `Alt-t` floats the global checklist over whatever you're doing; `Alt-t`
+  again dismisses it. `tk ls` lists open worktrees.
 - `Ctrl o w` (zellij session manager) is your ticket switcher; sessions
   survive reboots via session serialization.
 
@@ -153,10 +168,8 @@ tk done           # inside the worktree
 ```
 
 → summarises `git log` + diffstat through `claude -p`, shows you the draft,
-posts it as a **Jira comment** on confirmation, appends it to
-`Knowledge/tickets/FRD-123.md`, and harvests any `#hdl`-tagged lines into
-`Knowledge/hdl/inbox.md`. Weekly five-minute prune: promote inbox keepers
-into `best-practices.md`. That's how HDL folklore becomes a document.
+posts it as a **Jira comment** on confirmation, and appends it to
+`Knowledge/tickets/FRD-123.md`.
 
 Papers:
 
@@ -165,8 +178,7 @@ paper https://arxiv.org/abs/2410.20672
 ```
 
 → templated note in `Knowledge/papers/` (+ PDF), opens in `$EDITOR`.
-Everything — papers, ticket learnings, HDL practices — is one grep/telescope
-surface.
+Papers and ticket learnings are one grep/telescope surface.
 
 ## The scheme 🎨 — one palette, everywhere
 
@@ -179,7 +191,7 @@ hexes:
 | `.config/nvim/lua/dopamine_palette.lua` | passed to the dopamine colorscheme as its `palette` option |
 | `.config/wezterm/wezterm.lua` | `Dopamine Dark` / `Dopamine Light` schemes + ANSI slots |
 | `.config/zellij/themes/dopamine.kdl` | ribbon, tabs, frames, tables, lists |
-| `.config/tk/theme.json` | `tk view` — the ratatui ticket pane |
+| `.config/tk/theme.json` | `tk view` / `tk todo` — the ratatui panes |
 | `.config/gh-dash/config.yml` | the dash's `⇅ pull requests` pane |
 | `.config/yazi/flavors/dopamine-{dark,light}.yazi/` | the dash's `🗀 files` pane, flavour + preview tmTheme |
 
@@ -330,7 +342,8 @@ and `macos_window_background_blur` is simply ignored off macOS.
 | path | what |
 |---|---|
 | `dot_local/bin/executable_tk` | the whole workflow: open / view / done / ls / doctor |
-| `tk-tui/` | 🦀 the ratatui ticket TUI (`tk view`) — jira-cli `--raw` + ADF renderer |
+| `tk-tui/` | 🦀 the ratatui TUI (`tk view`, `tk todo`) — ticket pane + checklist, jira-cli `--raw` + ADF renderer, REST for descriptions |
+| `dot_local/bin/executable_tk-todo-float` | what `Alt-t` runs: float the checklist, or toggle it away if it's already up |
 | `run_onchange_before_20-build-tk-tui.sh.tmpl` | `cargo install`s tk-tui on `chezmoi apply` when its source changes |
 | `dot_local/bin/executable_paper` | arXiv → knowledge note |
 | `dot_local/share/tk/prepare-commit-msg` | ticket-prefix hook (installed per-repo by tk) |

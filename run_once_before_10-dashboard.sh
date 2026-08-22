@@ -4,21 +4,16 @@ set -e
 D="${DASHBOARD:-$HOME/Dashboard}"
 
 mkdir -p "$D/Code" "$D/Work" \
-         "$D/Knowledge/papers/pdf" "$D/Knowledge/hdl" "$D/Knowledge/tickets"
+         "$D/Knowledge/papers/pdf" "$D/Knowledge/tickets"
 
 seed() { [ -f "$1" ] || printf '%s\n' "$2" > "$1"; }
 
-seed "$D/Knowledge/hdl/best-practices.md" \
-"# HDL best practices
+seed "$D/todo.md" \
+"# Todo
 
-Curated. One dated bullet per practice, with the *why*.
-Promote entries here from inbox.md during the weekly prune."
-
-seed "$D/Knowledge/hdl/inbox.md" \
-"# HDL inbox
-
-Raw #hdl learnings land here automatically (\`tk done\`).
-Weekly five-minute prune: promote keepers → best-practices.md, delete the rest."
+Work with no ticket of its own. \`tk todo\` reads the \`- [ ]\` lines here and
+shows them alongside the TODO section of every open Jira ticket.
+Prose and headings are yours; only the checkbox lines are ever rewritten."
 
 seed "$D/Knowledge/tickets/README.md" \
 "# Ticket learnings
