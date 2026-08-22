@@ -38,8 +38,6 @@ pub struct Editor {
     pending: Option<char>,
     register: String,
     undo: Vec<(Vec<char>, usize)>,
-    /// True while the buffer is a brand-new item, so cancelling drops it.
-    pub fresh: bool,
 }
 
 /// Character classes for `w`/`b`/`e`, matching vim: word chars, punctuation,
@@ -69,7 +67,6 @@ impl Editor {
             pending: None,
             register: String::new(),
             undo: Vec::new(),
-            fresh: false,
         }
     }
 
@@ -85,10 +82,6 @@ impl Editor {
     /// caret, and what a test asserts against.
     pub fn cursor(&self) -> usize {
         self.cursor
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.chars.iter().all(|c| c.is_whitespace())
     }
 
     fn snapshot(&mut self) {

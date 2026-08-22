@@ -200,6 +200,14 @@ mod tests {
                     { "type": "text", "text": "linked", "marks": [{ "type": "link" }] }
                 ]},
                 { "type": "codeBlock", "content": [{ "type": "text", "text": "let x = 1;" }] },
+                { "type": "heading", "attrs": { "level": 2 },
+                  "content": [{ "type": "text", "text": "TODO" }] },
+                { "type": "taskList", "attrs": { "localId": "tl" }, "content": [
+                    { "type": "taskItem", "attrs": { "localId": "a1", "state": "TODO" },
+                      "content": [{ "type": "text", "text": "an open task" }] },
+                    { "type": "taskItem", "attrs": { "localId": "b2", "state": "DONE" },
+                      "content": [{ "type": "text", "text": "a finished task" }] }
+                ]},
                 { "type": "rule" }
             ]})),
             comments: vec![Comment {
@@ -259,6 +267,26 @@ mod tests {
         assert_eq!(find_line(&segs, "────────").style.fg, Some(th.rule));
         // the "── N comments ──" divider is the quiet colour, not the rule colour
         assert_eq!(find_line(&segs, "comment ──").style.fg, Some(th.dim));
+    }
+
+    /// A checkbox in the description reads as a checkbox in the pane, not as
+    /// bare text — the same nodes the checklist is built from.
+    #[test]
+    fn task_items_render_as_checkboxes() {
+        let segs = build(&ticket());
+        let th = theme();
+
+        let open = find_line(&segs, "an open task");
+        assert!(line_text(&open).starts_with("☐ "));
+        assert_eq!(open.spans[1].style.fg, Some(th.checkbox));
+
+        let done = find_line(&segs, "a finished task");
+        assert!(line_text(&done).starts_with("☑ "));
+        assert_eq!(done.spans[1].style.fg, Some(th.done));
+        assert!(
+            done.spans[2].style.add_modifier.contains(Modifier::CROSSED_OUT),
+            "a finished task reads as finished"
+        );
     }
 
     /// The pane must never paint a backdrop, or WezTerm's

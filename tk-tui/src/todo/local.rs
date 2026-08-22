@@ -94,10 +94,6 @@ impl LocalFile {
         })
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub fn items(&self) -> Vec<TodoItem> {
         self.lines
             .iter()

@@ -12,7 +12,7 @@ use super::model::{Origin, TodoGroup, TodoItem};
 use crate::adf;
 use crate::rest::{self, Config};
 use crate::ui::line_text;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 
 /// The heading that scopes the list. Checkboxes elsewhere in a description —

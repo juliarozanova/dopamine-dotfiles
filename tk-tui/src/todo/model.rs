@@ -15,15 +15,6 @@ pub enum Origin {
     Local { line: usize },
 }
 
-impl Origin {
-    pub fn ticket(&self) -> Option<&str> {
-        match self {
-            Origin::Jira { key, .. } => Some(key),
-            Origin::Local { .. } => None,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct TodoItem {
     pub text: String,
