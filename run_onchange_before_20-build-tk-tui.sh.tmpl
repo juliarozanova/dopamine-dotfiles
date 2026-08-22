@@ -4,8 +4,9 @@
 #
 # Cargo.toml: {{ include (joinPath .chezmoi.sourceDir "tk-tui/Cargo.toml") | sha256sum }}
 # Cargo.lock: {{ include (joinPath .chezmoi.sourceDir "tk-tui/Cargo.lock") | sha256sum }}
-{{- range glob (joinPath .chezmoi.sourceDir "tk-tui/src/*.rs") }}
-# {{ base . }}: {{ include . | sha256sum }}
+{{- $src := joinPath .chezmoi.sourceDir "tk-tui/src" }}
+{{- range glob (joinPath $src "**/*.rs") }}
+# {{ trimPrefix $src . }}: {{ include . | sha256sum }}
 {{- end }}
 set -e
 if ! command -v cargo >/dev/null 2>&1; then
