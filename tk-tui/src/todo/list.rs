@@ -7,7 +7,7 @@ use super::local::LocalFile;
 use super::model::{Origin, TodoGroup};
 use super::sync::{Op, Sync};
 use crate::editor::{EditMode, Editor, Outcome};
-use crate::ui::todo as render;
+use crate::ui::todo::{self as render, Sel};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::text::Line;
@@ -74,8 +74,11 @@ impl ItemList {
         }
     }
 
-    pub fn item_count(&self) -> usize {
-        self.groups.iter().map(|g| g.items.len()).sum()
+    /// Writes queued but not yet acknowledged. The footer reads the field
+    /// directly; this is for tests that need to wait for a write to land.
+    #[cfg(test)]
+    pub fn pending(&self) -> usize {
+        self.in_flight
     }
 
     pub fn editing(&self) -> bool {
@@ -84,42 +87,50 @@ impl ItemList {
 
     /// Clamp the cursor after the groups change, keeping your place.
     pub fn clamp(&mut self) {
-        let n = self.item_count();
-        if self.cursor >= n {
-            self.cursor = n.saturating_sub(1);
+        let n = self.target_count();
+        self.cursor = self.cursor.min(n.saturating_sub(1));
+    }
+
+    /// Every position the cursor can occupy, in display order — including one
+    /// per empty group, so a ticket with no checkboxes is still reachable.
+    fn selectables(&self) -> Vec<Sel> {
+        render::selectables(&self.groups)
+    }
+
+    pub fn target_count(&self) -> usize {
+        self.selectables().len()
+    }
+
+    /// The item under the cursor, if the cursor is on one at all.
+    pub fn at(&self, nth: usize) -> Option<(usize, usize)> {
+        match self.selectables().get(nth) {
+            Some(Sel::Item(gi, ii)) => Some((*gi, *ii)),
+            _ => None,
         }
     }
 
-    pub fn at(&self, nth: usize) -> Option<(usize, usize)> {
-        let mut seen = 0;
-        for (gi, g) in self.groups.iter().enumerate() {
-            if nth < seen + g.items.len() {
-                return Some((gi, nth - seen));
-            }
-            seen += g.items.len();
-        }
-        None
+    /// The group under the cursor, whether or not it has any items. This is
+    /// what `o` needs: adding to an empty ticket is the whole point.
+    pub fn group_at_cursor(&self) -> Option<usize> {
+        self.selectables().get(self.cursor).map(|s| s.group())
     }
 
     fn first_of_group(&self, gi: usize) -> usize {
-        self.groups[..gi].iter().map(|g| g.items.len()).sum()
+        self.selectables()
+            .iter()
+            .position(|s| s.group() == gi)
+            .unwrap_or(0)
     }
 
     fn flat_index_of(&self, origin: &Origin) -> Option<usize> {
-        let mut n = 0;
-        for g in &self.groups {
-            for it in &g.items {
-                if &it.origin == origin {
-                    return Some(n);
-                }
-                n += 1;
-            }
-        }
-        None
+        self.selectables().iter().position(|s| match s {
+            Sel::Item(gi, ii) => self.groups[*gi].items[*ii].origin == *origin,
+            Sel::EmptyGroup(_) => false,
+        })
     }
 
     pub fn move_cursor(&mut self, delta: i32) {
-        let n = self.item_count();
+        let n = self.target_count();
         if n == 0 {
             return;
         }
@@ -127,13 +138,10 @@ impl ItemList {
     }
 
     pub fn move_group(&mut self, dir: i32) {
-        let Some((gi, _)) = self.at(self.cursor) else {
+        let Some(gi) = self.group_at_cursor() else {
             return;
         };
         let target = (gi as i32 + dir).clamp(0, self.groups.len() as i32 - 1) as usize;
-        if self.groups[target].items.is_empty() {
-            return;
-        }
         self.cursor = self.first_of_group(target);
     }
 
@@ -193,7 +201,9 @@ impl ItemList {
         if self.groups.is_empty() {
             return;
         }
-        let gi = self.at(self.cursor).map(|(g, _)| g).unwrap_or(0);
+        let Some(gi) = self.group_at_cursor() else {
+            return;
+        };
         self.editing = Some(Edit {
             editor: Editor::new("", EditMode::Insert),
             target: Target::New(gi),
@@ -472,7 +482,7 @@ impl ItemList {
                 }
             }
             (KeyCode::Char('G'), _) | (KeyCode::End, _) => {
-                self.cursor = self.item_count().saturating_sub(1)
+                self.cursor = self.target_count().saturating_sub(1)
             }
             (KeyCode::Home, _) => self.cursor = 0,
             (KeyCode::Char('J'), _) => self.move_group(1),
@@ -554,7 +564,7 @@ impl ItemList {
             (Some(r), _) => Some(r),
             (None, Some((_, gi))) => rows
                 .iter()
-                .position(|r| r.item.map(|(g, _)| g) == Some(gi))
+                .position(|r| r.sel.map(Sel::group) == Some(gi))
                 .or_else(|| render::row_of(&rows, self.first_of_group(gi))),
             (None, None) => render::row_of(&rows, self.cursor),
         };
@@ -660,6 +670,97 @@ mod tests {
         assert_eq!(l.cursor, 0);
     }
 
+    /// The bug from the screenshot: two ticket groups with no checkboxes yet
+    /// were unreachable, so `j` stopped at the last local item and `o` always
+    /// fell back to group 0 — you could only ever add to "no ticket".
+    #[test]
+    fn the_cursor_reaches_a_ticket_that_has_no_items_yet() {
+        let mut l = ItemList::new(None);
+        l.groups = vec![
+            TodoGroup {
+                title: "no ticket".into(),
+                key: None,
+                items: vec![item("a", Origin::Local { line: 0 })],
+            },
+            TodoGroup { title: "t2".into(), key: Some("JROZ-2".into()), items: vec![] },
+            TodoGroup { title: "t1".into(), key: Some("JROZ-1".into()), items: vec![] },
+        ];
+
+        assert_eq!(l.target_count(), 3, "each empty ticket is a position");
+        assert_eq!(l.group_at_cursor(), Some(0));
+
+        press(&mut l, 'j');
+        assert_eq!(l.group_at_cursor(), Some(1), "j reaches the empty JROZ-2");
+        assert_eq!(l.at(l.cursor), None, "…and it is not an item");
+
+        press(&mut l, 'j');
+        assert_eq!(l.group_at_cursor(), Some(2));
+        press(&mut l, 'j');
+        assert_eq!(l.group_at_cursor(), Some(2), "clamps at the end");
+        press(&mut l, 'k');
+        assert_eq!(l.group_at_cursor(), Some(1));
+    }
+
+    #[test]
+    fn o_on_an_empty_ticket_adds_to_that_ticket_not_to_the_local_file() {
+        let mut l = ItemList::new(None);
+        l.groups = vec![
+            TodoGroup {
+                title: "no ticket".into(),
+                key: None,
+                items: vec![item("a", Origin::Local { line: 0 })],
+            },
+            TodoGroup { title: "t".into(), key: Some("JROZ-2".into()), items: vec![] },
+        ];
+
+        press(&mut l, 'j');
+        press(&mut l, 'o');
+        for c in "wire the harness".chars() {
+            press(&mut l, c);
+        }
+        l.edit_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(l.in_flight, 1, "the add must be queued for Jira");
+        assert!(
+            l.status.as_deref().unwrap_or("").contains("wire the harness"),
+            "got: {:?}",
+            l.status
+        );
+    }
+
+    #[test]
+    fn shift_j_and_k_jump_to_empty_groups_too() {
+        let mut l = ItemList::new(None);
+        l.groups = vec![
+            TodoGroup {
+                title: "no ticket".into(),
+                key: None,
+                items: vec![item("a", Origin::Local { line: 0 })],
+            },
+            TodoGroup { title: "t".into(), key: Some("JROZ-2".into()), items: vec![] },
+        ];
+        press(&mut l, 'J');
+        assert_eq!(l.group_at_cursor(), Some(1));
+        press(&mut l, 'K');
+        assert_eq!(l.group_at_cursor(), Some(0));
+    }
+
+    /// Operations that need a real item must decline politely on an empty
+    /// group rather than acting on whatever happens to be at index 0.
+    #[test]
+    fn item_operations_are_no_ops_on_an_empty_group() {
+        let mut l = ItemList::new(None);
+        l.groups = vec![TodoGroup {
+            title: "t".into(),
+            key: Some("JROZ-2".into()),
+            items: vec![],
+        }];
+        l.toggle();
+        l.delete_item();
+        l.promote();
+        assert_eq!(l.in_flight, 0, "nothing may be written");
+    }
+
     #[test]
     fn an_empty_list_does_not_panic() {
         let mut l = ItemList::new(None);
@@ -669,7 +770,7 @@ mod tests {
         l.delete_item();
         l.new_item();
         l.promote();
-        assert_eq!(l.item_count(), 0);
+        assert_eq!(l.target_count(), 0);
     }
 
     #[test]
@@ -920,6 +1021,40 @@ mod render_tests {
         let first = screen.iter().position(|r| r.contains("first local")).unwrap();
         assert_eq!(at, first + 1, "it stays in its own row");
         assert!(screen.iter().any(|r| r.contains("on the ticket")), "nothing else moved");
+    }
+
+    /// The cursor indexes one list and the renderer paints another; if they
+    /// ever disagree the highlight lands on the wrong row. Hold them in step.
+    #[test]
+    fn every_cursor_position_has_exactly_one_row() {
+        let mut l = populated();
+        l.groups.push(TodoGroup {
+            title: "empty".into(),
+            key: Some("JROZ-9".into()),
+            items: vec![],
+        });
+        let rows = render::rows(&l.groups, render::Editing::None);
+        let painted: Vec<_> = rows.iter().filter_map(|r| r.sel).collect();
+        assert_eq!(painted, l.selectables());
+        assert_eq!(painted.len(), l.target_count());
+        for n in 0..l.target_count() {
+            assert!(render::row_of(&rows, n).is_some(), "position {n} has no row");
+        }
+    }
+
+    #[test]
+    fn the_highlight_can_land_on_an_empty_group() {
+        let mut l = populated();
+        l.groups.push(TodoGroup {
+            title: "empty ticket".into(),
+            key: Some("JROZ-9".into()),
+            items: vec![],
+        });
+        l.cursor = l.target_count() - 1;
+        assert!(
+            highlighted(&mut l).unwrap().contains("nothing yet"),
+            "the placeholder row is where the cursor sits"
+        );
     }
 
     #[test]

@@ -6,11 +6,30 @@ use crate::todo::model::TodoGroup;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// One rendered row. `item` is the (group, item) it belongs to, or None for
-/// headings and spacers — which is what keeps the cursor on real items only.
+/// Something the cursor can sit on.
+///
+/// An empty group is a position in its own right, not a gap to skip: it's the
+/// only way to reach a ticket that has no checkboxes yet, which is exactly
+/// where you want to press `o`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Sel {
+    Item(usize, usize),
+    EmptyGroup(usize),
+}
+
+impl Sel {
+    pub fn group(self) -> usize {
+        match self {
+            Sel::Item(gi, _) | Sel::EmptyGroup(gi) => gi,
+        }
+    }
+}
+
+/// One rendered row. `sel` is what the cursor lands on here, or None for
+/// headings and spacers.
 pub struct Row {
     pub line: Line<'static>,
-    pub item: Option<(usize, usize)>,
+    pub sel: Option<Sel>,
     /// The row holding the live edit buffer, if any.
     pub editing: bool,
 }
@@ -57,12 +76,12 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
     let mut out = Vec::new();
     let plain = |l: Line<'static>| Row {
         line: l,
-        item: None,
+        sel: None,
         editing: false,
     };
     let edit_row = |text: &str, cursor: usize, insert: bool| Row {
         line: edit_line(text, cursor, insert),
-        item: None,
+        sel: None,
         editing: true,
     };
 
@@ -97,10 +116,15 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
         let adding = matches!(editing, Editing::New { gi: g2, .. } if g2 == gi);
 
         if g.items.is_empty() && !adding {
-            out.push(plain(Line::from(vec![
-                Span::raw("   "),
-                Span::styled("(nothing yet — o to add)".to_string(), dim()),
-            ])));
+            // selectable, so `o` can reach a ticket with no checkboxes yet
+            out.push(Row {
+                line: Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled("(nothing yet — o to add)".to_string(), dim()),
+                ]),
+                sel: Some(Sel::EmptyGroup(gi)),
+                editing: false,
+            });
             continue;
         }
 
@@ -133,7 +157,7 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
                     Span::raw(" "),
                     Span::styled(it.text.clone(), text_style),
                 ]),
-                item: Some((gi, ii)),
+                sel: Some(Sel::Item(gi, ii)),
                 editing: false,
             });
         }
@@ -155,13 +179,29 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
     out
 }
 
-/// Row index of the nth item overall, for scrolling the cursor into view.
+/// Row index of the nth selectable position, for placing the cursor.
 pub fn row_of(rows: &[Row], nth: usize) -> Option<usize> {
     rows.iter()
         .enumerate()
-        .filter(|(_, r)| r.item.is_some())
+        .filter(|(_, r)| r.sel.is_some())
         .map(|(i, _)| i)
         .nth(nth)
+}
+
+/// Every position the cursor can occupy, in display order. `ItemList` builds
+/// the same sequence from the groups; a test holds the two in step.
+pub fn selectables(groups: &[TodoGroup]) -> Vec<Sel> {
+    groups
+        .iter()
+        .enumerate()
+        .flat_map(|(gi, g)| {
+            if g.items.is_empty() {
+                vec![Sel::EmptyGroup(gi)]
+            } else {
+                (0..g.items.len()).map(|ii| Sel::Item(gi, ii)).collect()
+            }
+        })
+        .collect()
 }
 
 /// The row being edited: the buffer with a block caret at the cursor, plus a
@@ -232,8 +272,11 @@ mod tests {
     #[test]
     fn only_item_rows_are_selectable() {
         let rs = rows(&groups(), Editing::None);
-        let selectable: Vec<_> = rs.iter().filter_map(|r| r.item).collect();
-        assert_eq!(selectable, vec![(0, 0), (1, 0), (1, 1)]);
+        let selectable: Vec<_> = rs.iter().filter_map(|r| r.sel).collect();
+        assert_eq!(
+            selectable,
+            vec![Sel::Item(0, 0), Sel::Item(1, 0), Sel::Item(1, 1)]
+        );
     }
 
     #[test]
@@ -241,7 +284,7 @@ mod tests {
         let rs = rows(&groups(), Editing::None);
         // the third item is the ticked one in the second group
         let r = row_of(&rs, 2).unwrap();
-        assert_eq!(rs[r].item, Some((1, 1)));
+        assert_eq!(rs[r].sel, Some(Sel::Item(1, 1)));
     }
 
     #[test]

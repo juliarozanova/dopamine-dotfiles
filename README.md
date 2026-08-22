@@ -102,7 +102,8 @@ browser, `q` quit.
 
 **Inside the checklist** (`tk todo`, or `t` in the ticket TUI): `j/k` move,
 `J/K` jump group, **space** tick, **i** edit text, **o** new item in the
-group you're in, **dd** delete, **p** promote a local item onto a ticket,
+group you're on — including a ticket with no checkboxes yet, which is how you
+start one — **dd** delete, **p** promote a local item onto a ticket,
 **⏎** open the ticket an item belongs to, **r** refresh, `q` quit.
 
 **Editing text** anywhere in tk is modal — the same small vim in the

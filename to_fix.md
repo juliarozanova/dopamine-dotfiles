@@ -73,6 +73,13 @@
       group's row, or on an empty list drew nowhere at all (typing blind).
       Editing is now an input to building the rows.
 
+11. ~~Couldn't add items to a ticket with no checkboxes yet~~ — `j` walked
+    only *items*, so a ticket group with none was unreachable and `o` fell
+    back to group 0: everything landed under "no ticket". An empty group is
+    now a cursor position in its own right, so j/k/J/K reach it and `o` adds
+    to that ticket, syncing to the description. Item-only operations (space,
+    dd, p) decline politely there instead of acting on index 0.
+
 # Parked (theming — revisit later)
 7. Dash colour scheme?
 8. Light/dark from the single chezmoi palette?
