@@ -116,16 +116,44 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // compose box
     if let Mode::Compose { reply_to } = &app.mode {
+        let insert = app.input.mode() == crate::editor::EditMode::Insert;
+        let how = if insert { "esc normal · ZZ send" } else { "ZZ send · ZQ discard" };
         let title = match reply_to {
             Some(i) => format!(
-                " reply to {} — ctrl-s send · esc cancel ",
+                " reply to {} — {how} ",
                 app.ticket.comments[*i].author
             ),
-            None => format!(" comment on {} — ctrl-s send · esc cancel ", app.key),
+            None => format!(" comment on {} — {how} ", app.key),
         };
-        let mut text: Vec<Line> = app.input.split('\n').map(Line::raw).collect();
-        if let Some(last) = text.last_mut() {
-            last.spans.push(Span::styled("▌", Style::default().fg(theme().accent)));
+        let buf = app.input.text();
+        let mut text: Vec<Line> = buf.split('\n').map(|l| Line::raw(l.to_string())).collect();
+        // place the caret on the line the cursor is actually in
+        let (caret_line, caret_col) = {
+            let mut remaining = app.input.cursor();
+            let mut row = 0;
+            for (i, l) in buf.split('\n').enumerate() {
+                let n = l.chars().count();
+                row = i;
+                if remaining <= n {
+                    break;
+                }
+                remaining -= n + 1;
+            }
+            (row, remaining)
+        };
+        if let Some(line) = text.get_mut(caret_line) {
+            let chars: Vec<char> = line_text(line).chars().collect();
+            let before: String = chars[..caret_col.min(chars.len())].iter().collect();
+            let at: String = chars.get(caret_col).copied().unwrap_or(' ').to_string();
+            let after: String = chars
+                .get(caret_col + 1..)
+                .map(|c| c.iter().collect())
+                .unwrap_or_default();
+            *line = Line::from(vec![
+                Span::raw(before),
+                Span::styled(at, Style::default().fg(theme().inverted).bg(theme().accent)),
+                Span::raw(after),
+            ]);
         }
         // keep the last lines visible in the fixed-height box
         let inner_h = chunks[1].height.saturating_sub(2) as usize;

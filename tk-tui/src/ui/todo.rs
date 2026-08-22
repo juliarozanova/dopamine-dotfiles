@@ -112,6 +112,30 @@ pub fn row_of(rows: &[Row], nth: usize) -> Option<usize> {
         .nth(nth)
 }
 
+/// The row being edited: the buffer with a block caret at the cursor, plus a
+/// mode marker so you can see at a glance whether typing inserts or commands.
+pub fn edit_line(text: &str, cursor: usize, insert: bool) -> Line<'static> {
+    let th = theme();
+    let chars: Vec<char> = text.chars().collect();
+    let before: String = chars[..cursor.min(chars.len())].iter().collect();
+    let at: String = chars.get(cursor).copied().unwrap_or(' ').to_string();
+    let after: String = chars
+        .get(cursor + 1..)
+        .map(|c| c.iter().collect())
+        .unwrap_or_default();
+
+    Line::from(vec![
+        Span::styled(
+            if insert { "❯" } else { "▪" }.to_string(),
+            Style::default().fg(th.accent),
+        ),
+        Span::raw(" ☐ "),
+        Span::styled(before, Style::default().fg(th.fg)),
+        Span::styled(at, Style::default().fg(th.inverted).bg(th.accent)),
+        Span::styled(after, Style::default().fg(th.fg)),
+    ])
+}
+
 pub fn plain_dump(groups: &[TodoGroup]) -> Vec<String> {
     rows(groups)
         .iter()

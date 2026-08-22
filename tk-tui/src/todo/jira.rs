@@ -245,10 +245,17 @@ pub fn remove(doc: &Value, local_id: &str) -> Result<Value> {
         };
         let before = kids.len();
         kids.retain(|k| !(k["type"] == "taskItem" && item_local_id(k) == local_id));
-        if kids.len() != before {
-            return true;
+        let hit = kids.len() != before || kids.iter_mut().any(|k| prune(k, local_id));
+        if hit {
+            // ADF requires a taskList to hold at least one taskItem, so taking
+            // the last one out means taking the list with it. Jira rejects the
+            // whole document with a bare INVALID_INPUT otherwise.
+            kids.retain(|k| {
+                k["type"] != "taskList"
+                    || k["content"].as_array().map(|c| !c.is_empty()).unwrap_or(false)
+            });
         }
-        kids.iter_mut().any(|k| prune(k, local_id))
+        hit
     }
     if !prune(&mut out, local_id) {
         anyhow::bail!("that item is no longer in the ticket — press r to refresh");
@@ -276,6 +283,8 @@ pub fn add(doc: Option<&Value>, text: &str) -> (Value, String) {
     }
 
     // An existing task list inside the section takes the item…
+    // (An empty one can't exist — `remove` drops a list when its last item
+    // goes, because ADF rejects a childless taskList.)
     if let Some(range) = section_range(&out) {
         let end = range.end;
         let nodes = out["content"].as_array_mut().expect("set above");
@@ -455,6 +464,32 @@ mod tests {
         assert_eq!(item_local_id(&list[0]), "b2");
         // the checkbox outside the section is untouched
         assert_eq!(after["content"][8], doc()["content"][8]);
+    }
+
+    /// ADF requires a taskList to have at least one taskItem — Jira answers a
+    /// childless one with a bare `INVALID_INPUT`. Caught by the live test,
+    /// because the fixture above happens to have two items in its list.
+    #[test]
+    fn removing_the_last_item_takes_the_empty_list_with_it() {
+        let d = json!({ "type": "doc", "version": 1, "content": [
+            { "type": "paragraph", "content": [{ "type": "text", "text": "keep me" }] },
+            heading(2, "TODO"),
+            { "type": "taskList", "attrs": { "localId": "tl" },
+              "content": [task("only", "TODO", "the last one")] },
+        ]});
+        let after = remove(&d, "only").unwrap();
+        let nodes = after["content"].as_array().unwrap();
+        assert_eq!(nodes.len(), 2, "the empty taskList must go");
+        assert_eq!(nodes[0], d["content"][0], "the prose stays");
+        assert_eq!(text_of(&nodes[1]), SECTION, "the heading stays as an anchor");
+        assert!(items("K", &after).is_empty());
+    }
+
+    #[test]
+    fn removing_one_of_several_leaves_the_list_alone() {
+        let after = remove(&doc(), "a1").unwrap();
+        assert_eq!(after["content"][4]["type"], "taskList");
+        assert_eq!(after["content"][4]["content"].as_array().unwrap().len(), 1);
     }
 
     #[test]

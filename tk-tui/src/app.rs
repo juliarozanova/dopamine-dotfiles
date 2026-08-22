@@ -1,6 +1,7 @@
 //! App state + the actions that mutate it. Terminal/event plumbing lives in
 //! main.rs; rendering in ui.rs.
 
+use crate::editor::{EditMode, Editor};
 use crate::jira::{self, Ticket};
 use crate::ui::{build, line_text, Segments};
 use anyhow::Result;
@@ -18,7 +19,10 @@ pub struct App {
     pub scroll: u16,
     pub sel: Option<usize>, // selected comment
     pub mode: Mode,
-    pub input: String,
+    /// The compose buffer. Same modal editor the checklist uses, so `ctrl-s`
+    /// is no longer needed to send — which matters, because `ctrl-s` is
+    /// terminal flow control and the terminal eats it before we see it.
+    pub input: Editor,
     pub status: Option<String>,
     pub pending_g: bool,
 }
@@ -34,7 +38,7 @@ impl App {
             scroll: 0,
             sel: None,
             mode: Mode::Normal,
-            input: String::new(),
+            input: Editor::new("", EditMode::Insert),
             status: None,
             pending_g: false,
         })
@@ -113,7 +117,7 @@ impl App {
     }
 
     pub fn submit(&mut self) {
-        let text = self.input.trim().to_string();
+        let text = self.input.text().trim().to_string();
         if text.is_empty() {
             self.status = Some("empty — not sent".into());
             self.mode = Mode::Normal;
@@ -127,7 +131,7 @@ impl App {
         };
         match jira::add_comment(&self.key, &body) {
             Ok(()) => {
-                self.input.clear();
+                self.input = Editor::new("", EditMode::Insert);
                 self.mode = Mode::Normal;
                 self.reload();
                 self.status = Some("comment posted ✓".into());
