@@ -112,7 +112,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
         let footer = match &app.todo.status {
             Some(s) => Line::styled(format!(" {s}"), Style::default().fg(theme().status)),
-            None => Line::styled(app.todo.hint(), dim()),
+            None => Line::styled(
+                app.todo.hint().replace("q quit", "esc ticket · q quit"),
+                dim(),
+            ),
         };
         f.render_widget(Paragraph::new(footer), chunks[2]);
         return;
@@ -193,10 +196,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     // footer: status flash or key hints
+    // The way back leads, because the footer is longer than most panes are
+    // wide and the tail is the first thing a narrow pane loses.
+    let back = if app.nested { "esc todo list · " } else { "" };
     let footer = match &app.status {
         Some(s) => Line::styled(format!(" {s}"), Style::default().fg(theme().status)),
         None => Line::styled(
-            " j/k scroll · u/d ½page · gg/G · J/K comment · t todo · r refresh · c comment · R reply · w web · q quit",
+            format!(
+                " {back}t todo · j/k scroll · u/d ½page · gg/G · J/K comment · r refresh · c comment · R reply · w web · q quit"
+            ),
             dim(),
         ),
     };
@@ -365,6 +373,7 @@ mod render_tests {
             status: None,
             pending_g: false,
             focus: Focus::Full,
+            nested: false,
             todo,
         }
     }
@@ -415,11 +424,45 @@ mod render_tests {
         assert!(screen(&mut a).join("\n").contains("a summary"));
     }
 
+    /// The footer is longer than a floating pane is wide, so anything that
+    /// matters has to survive truncation at a realistic width.
     #[test]
     fn the_footer_advertises_the_todo_toggle() {
         let mut a = app();
         let footer = screen(&mut a).last().unwrap().clone();
         assert!(footer.contains("t todo"), "hotkey hints must mention it: {footer:?}");
+    }
+
+    /// Enter from the checklist has to leave you a way home, and the footer
+    /// has to say what it is.
+    #[test]
+    fn a_nested_ticket_advertises_the_way_back() {
+        let mut a = app();
+        assert!(
+            !screen(&mut a).last().unwrap().contains("esc todo list"),
+            "a standalone `tk view` has nowhere to go back to"
+        );
+        a.nested = true;
+        assert!(screen(&mut a).last().unwrap().contains("esc todo list"));
+    }
+
+    #[test]
+    fn esc_steps_back_but_q_closes_the_pane() {
+        use crate::view::Action;
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let key = |c| KeyEvent::new(c, KeyModifiers::NONE);
+
+        let mut a = app();
+        assert!(matches!(a.key(key(KeyCode::Esc), 14), Action::Pop));
+
+        let mut a = app();
+        assert!(matches!(a.key(key(KeyCode::Char('q')), 14), Action::Quit));
+
+        // and from the ticket's own checklist, esc returns to the ticket
+        let mut a = app();
+        a.focus = Focus::Todo;
+        assert!(matches!(a.key(key(KeyCode::Esc), 14), Action::None));
+        assert_eq!(a.focus, Focus::Full);
     }
 
     #[test]

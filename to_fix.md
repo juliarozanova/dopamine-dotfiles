@@ -80,6 +80,13 @@
     to that ticket, syncing to the description. Item-only operations (space,
     dd, p) decline politely there instead of acting on index 0.
 
+12. ~~⏎ on a ticket should open the ticket pane~~ — it opened that ticket's
+    checklist instead, and only from an item, so a ticket with no checkboxes
+    couldn't be opened at all. ⏎ now opens the ticket pane proper from either
+    an item or a group heading, `t` still swaps to its checklist, and `esc`
+    steps back to the global list. `q` closes the pane from anywhere — those
+    two meanings used to share one key.
+
 # Parked (theming — revisit later)
 7. Dash colour scheme?
 8. Light/dark from the single chezmoi palette?

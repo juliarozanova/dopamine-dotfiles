@@ -22,7 +22,7 @@ pub enum Mode {
 /// description already contains the TODO section, so a separate pane would be
 /// a strict subset of its neighbour — the redundancy that got the hdl inbox
 /// removed in the first place.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Focus {
     Full,
     Todo,
@@ -42,6 +42,9 @@ pub struct App {
     pub status: Option<String>,
     pub pending_g: bool,
     pub focus: Focus,
+    /// True when this pane was opened from the checklist, so `esc` has
+    /// somewhere to go back to and the footer can say so.
+    pub nested: bool,
     /// This ticket's TODO section, as an editable checklist. Rebuilt whenever
     /// the ticket is (re)loaded.
     pub todo: ItemList,
@@ -62,16 +65,11 @@ impl App {
             status: None,
             pending_g: false,
             focus: Focus::Full,
+            nested: false,
             todo: ItemList::new(None),
         };
         app.rebuild_todo();
         Ok(app)
-    }
-
-    /// Open straight into TODO mode — used when you click through from the
-    /// aggregate checklist.
-    pub fn show_todo(&mut self) {
-        self.focus = Focus::Todo;
     }
 
     fn rebuild_todo(&mut self) {
@@ -227,7 +225,12 @@ impl App {
                 return Action::None;
             }
             return match self.todo.key(k, view_h) {
-                ListAction::Quit => Action::Pop,
+                ListAction::Quit => Action::Quit,
+                // esc leaves the checklist for the ticket it belongs to
+                ListAction::Back => {
+                    self.focus = Focus::Full;
+                    Action::None
+                }
                 ListAction::Reload => {
                     self.reload();
                     Action::None
@@ -243,8 +246,11 @@ impl App {
         let half = (view_h / 2).max(1) as i32;
 
         match (k.code, ctrl) {
-            (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => return Action::Pop,
+            (KeyCode::Char('q'), _) => return Action::Quit,
             (KeyCode::Char('c'), true) => return Action::Quit,
+            // back to the checklist you came from; at the top level there is
+            // nowhere to go, and popping the last view exits as it always did
+            (KeyCode::Esc, _) => return Action::Pop,
 
             (KeyCode::Char('t'), false) => self.focus = Focus::Todo,
 

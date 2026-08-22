@@ -19,6 +19,19 @@ pub enum Action {
     Quit,
 }
 
+/// Views are big and hold terminals' worth of state; naming the variant is all
+/// a failing assertion needs.
+impl std::fmt::Debug for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Action::None => "None",
+            Action::Push(_) => "Push(..)",
+            Action::Pop => "Pop",
+            Action::Quit => "Quit",
+        })
+    }
+}
+
 pub enum View {
     Todo(Box<TodoView>),
     Ticket(Box<App>),
@@ -33,11 +46,12 @@ impl View {
         Ok(View::Ticket(Box::new(App::new(key)?)))
     }
 
-    /// A ticket opened from the checklist lands in TODO mode — you clicked
-    /// through from a task, so the tasks are what you want to see first.
-    pub fn ticket_todo(key: &str) -> Result<Self> {
+    /// A ticket opened from the checklist. It's the ticket pane proper —
+    /// description and comments — with `t` still there for its checklist, and
+    /// `esc` to step back to the list you came from.
+    pub fn ticket_from_list(key: &str) -> Result<Self> {
         let mut app = App::new(key)?;
-        app.show_todo();
+        app.nested = true;
         Ok(View::Ticket(Box::new(app)))
     }
 
@@ -68,8 +82,8 @@ impl View {
     pub fn key(&mut self, k: KeyEvent, view_h: u16) -> Result<Action> {
         Ok(match self {
             View::Todo(v) => match v.key(k, view_h) {
-                ListAction::Quit => Action::Pop,
-                ListAction::Open(key) => match View::ticket_todo(&key) {
+                ListAction::Quit | ListAction::Back => Action::Pop,
+                ListAction::Open(key) => match View::ticket_from_list(&key) {
                     Ok(view) => Action::Push(Box::new(view)),
                     Err(e) => {
                         v.list.status = Some(format!("can't open {key}: {e:#}"));

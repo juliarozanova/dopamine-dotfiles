@@ -32,8 +32,10 @@ struct Edit {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ListAction {
     None,
-    /// Leave this view.
+    /// Close the pane entirely.
     Quit,
+    /// Step back to wherever you came from, if anywhere.
+    Back,
     /// Open the ticket the cursor is on.
     Open(String),
     /// Reload from the backends.
@@ -461,8 +463,9 @@ impl ItemList {
         let half = (view_h / 2).max(1) as i32;
 
         match (k.code, ctrl) {
-            (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => return ListAction::Quit,
+            (KeyCode::Char('q'), _) => return ListAction::Quit,
             (KeyCode::Char('c'), true) => return ListAction::Quit,
+            (KeyCode::Esc, _) => return ListAction::Back,
 
             (KeyCode::Char('j'), false) | (KeyCode::Down, _) => self.move_cursor(1),
             (KeyCode::Char('k'), false) | (KeyCode::Up, _) => self.move_cursor(-1),
@@ -509,11 +512,14 @@ impl ItemList {
                     self.pending_d = true;
                 }
             }
+            // Open works from a group heading as well as from an item, so a
+            // ticket with no checkboxes yet is still something you can enter.
             (KeyCode::Enter, _) => {
-                if let Some((gi, _)) = self.at(self.cursor) {
+                if let Some(gi) = self.group_at_cursor() {
                     if let Some(key) = self.groups[gi].key.clone() {
                         return ListAction::Open(key);
                     }
+                    self.status = Some("no ticket to open — these are local".into());
                 }
             }
             _ => {}
@@ -600,7 +606,7 @@ impl ItemList {
         } else if self.picking() {
             " j/k choose ticket · ⏎ move it there · esc cancel"
         } else {
-            " j/k move · space done · i edit · o new · dd delete · p promote · ⏎ open · r refresh · q quit"
+            " j/k move · space done · i edit · o new · dd delete · p promote · ⏎ open ticket · r refresh · q quit"
         };
         match self.in_flight {
             0 => base.to_string(),
@@ -771,6 +777,24 @@ mod tests {
         l.new_item();
         l.promote();
         assert_eq!(l.target_count(), 0);
+    }
+
+    #[test]
+    fn enter_opens_a_ticket_that_has_no_items_yet() {
+        let mut l = ItemList::new(None);
+        l.groups = vec![
+            TodoGroup {
+                title: "no ticket".into(),
+                key: None,
+                items: vec![item("a", Origin::Local { line: 0 })],
+            },
+            TodoGroup { title: "t".into(), key: Some("JROZ-2".into()), items: vec![] },
+        ];
+        press(&mut l, 'j');
+        assert_eq!(
+            l.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 20),
+            ListAction::Open("JROZ-2".into())
+        );
     }
 
     #[test]

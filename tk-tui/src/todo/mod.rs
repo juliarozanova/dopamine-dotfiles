@@ -139,6 +139,80 @@ mod live {
         v.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), 20);
     }
 
+    /// The full round trip: land on a ticket in the list, press enter, get the
+    /// ticket pane, press esc, be back where you were.
+    #[test]
+    #[ignore = "talks to real Jira"]
+    fn enter_opens_the_ticket_and_esc_comes_back() {
+        use crate::view::{Action, View};
+
+        let key = std::env::var("TK_TEST_ISSUE").unwrap_or_else(|_| "JROZ-1".into());
+        let mut stack = vec![View::todo().expect("todo view")];
+
+        // walk to the ticket, however far down it is
+        if let View::Todo(v) = stack.last_mut().unwrap() {
+            let gi = v
+                .list
+                .groups
+                .iter()
+                .position(|g| g.key.as_deref() == Some(key.as_str()))
+                .unwrap_or_else(|| panic!("{key} not listed"));
+            v.list.cursor = 0;
+            for _ in 0..v.list.target_count() {
+                if v.list.group_at_cursor() == Some(gi) {
+                    break;
+                }
+                press(v, 'j');
+            }
+            assert_eq!(v.list.group_at_cursor(), Some(gi));
+        }
+
+        // enter
+        let act = stack
+            .last_mut()
+            .unwrap()
+            .key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 20)
+            .expect("key");
+        match act {
+            Action::Push(v) => stack.push(*v),
+            other => panic!("enter should push a view, got {other:?}"),
+        }
+        assert_eq!(stack.len(), 2);
+        match stack.last().unwrap() {
+            View::Ticket(a) => {
+                assert_eq!(a.key, key);
+                assert!(a.nested, "it must know it can go back");
+                assert_eq!(
+                    a.focus,
+                    crate::app::Focus::Full,
+                    "enter lands on the ticket itself, not its checklist"
+                );
+                println!("opened {} — {}", a.key, a.ticket.summary);
+            }
+            _ => panic!("expected a ticket view"),
+        }
+
+        // esc
+        let act = stack
+            .last_mut()
+            .unwrap()
+            .key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 20)
+            .expect("key");
+        assert!(matches!(act, Action::Pop), "esc should pop, got {act:?}");
+        stack.pop();
+        assert_eq!(stack.len(), 1, "back at the checklist");
+        assert!(matches!(stack.last().unwrap(), View::Todo(_)));
+        println!("esc returned to the checklist");
+
+        // q from the ticket closes the pane outright
+        let mut t = View::ticket_from_list(&key).expect("ticket");
+        let act = t
+            .key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), 20)
+            .expect("key");
+        assert!(matches!(act, Action::Quit), "q should quit, got {act:?}");
+        println!("q quits");
+    }
+
     #[test]
     #[ignore = "writes to a real Jira ticket"]
     fn adds_to_an_empty_ticket_through_the_keys_you_actually_press() {
