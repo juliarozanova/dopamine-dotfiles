@@ -1,35 +1,58 @@
 //! tk-tui — ratatui Jira ticket pane for the tk workflow.
 //!
-//!   tk-tui ISSUE-KEY          interactive pane
-//!   tk-tui --dump ISSUE-KEY   plain-text render to stdout (for scripts/tests)
+//!   tk-tui ISSUE-KEY          interactive ticket pane
+//!   tk-tui --todo             the aggregate checklist
+//!   tk-tui --dump [KEY]       plain-text render to stdout (for scripts/tests)
 //!
-//! Launch via `tk view` so JIRA_API_TOKEN is freshly sourced.
+//! Launch via `tk view` / `tk todo` so JIRA_API_TOKEN is freshly sourced.
 
 mod adf;
 mod app;
 mod jira;
 mod theme;
+mod todo;
 mod ui;
 
 use anyhow::Result;
 use app::{App, Mode};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
+use todo::TodoView;
+
+const USAGE: &str = "usage: tk-tui [--dump] ISSUE-KEY  |  tk-tui [--dump] --todo";
 
 fn main() -> Result<()> {
     let mut key: Option<String> = None;
     let mut dump = false;
+    let mut todo_mode = false;
     for a in std::env::args().skip(1) {
         match a.as_str() {
             "--dump" => dump = true,
+            "--todo" => todo_mode = true,
             "-h" | "--help" => {
-                println!("usage: tk-tui [--dump] ISSUE-KEY");
+                println!("{USAGE}");
                 return Ok(());
             }
             other => key = Some(other.to_string()),
         }
     }
-    let key = key.ok_or_else(|| anyhow::anyhow!("usage: tk-tui [--dump] ISSUE-KEY"))?;
+
+    if todo_mode {
+        let mut view = TodoView::new()?;
+        if dump {
+            for line in view.dump() {
+                println!("{line}");
+            }
+            return Ok(());
+        }
+        require_tty("--todo")?;
+        let mut terminal = ratatui::init();
+        let res = run_todo(&mut terminal, &mut view);
+        ratatui::restore();
+        return res;
+    }
+
+    let key = key.ok_or_else(|| anyhow::anyhow!("{USAGE}"))?;
 
     if dump {
         let t = jira::fetch(&key)?;
@@ -39,15 +62,67 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
-        anyhow::bail!("tk-tui needs a TTY — use `tk-tui --dump {key}` for plain output");
-    }
+    require_tty(&key)?;
 
     let mut app = App::new(&key)?;
     let mut terminal = ratatui::init(); // raw mode + alt screen + panic hook
     let res = run(&mut terminal, &mut app);
     ratatui::restore();
     res
+}
+
+fn require_tty(what: &str) -> Result<()> {
+    if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        anyhow::bail!("tk-tui needs a TTY — use `tk-tui --dump {what}` for plain output");
+    }
+    Ok(())
+}
+
+fn run_todo(terminal: &mut DefaultTerminal, view: &mut TodoView) -> Result<()> {
+    loop {
+        terminal.draw(|f| view.draw(f))?;
+
+        let Event::Key(k) = event::read()? else { continue };
+        if k.kind != KeyEventKind::Press {
+            continue;
+        }
+        view.status = None;
+
+        let view_h = terminal.size()?.height.saturating_sub(1);
+        let half = (view_h / 2).max(1) as i32;
+        let g = std::mem::take(&mut view.pending_g);
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+
+        match (k.code, ctrl) {
+            (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => return Ok(()),
+            (KeyCode::Char('c'), true) => return Ok(()),
+
+            (KeyCode::Char('j'), false) | (KeyCode::Down, _) => view.move_cursor(1),
+            (KeyCode::Char('k'), false) | (KeyCode::Up, _) => view.move_cursor(-1),
+            (KeyCode::Char('d'), _) => view.move_cursor(half),
+            (KeyCode::Char('u'), _) => view.move_cursor(-half),
+            (KeyCode::Char('f'), true) | (KeyCode::PageDown, _) => view.move_cursor(view_h as i32),
+            (KeyCode::Char('b'), true) | (KeyCode::PageUp, _) => view.move_cursor(-(view_h as i32)),
+            (KeyCode::Char('g'), false) => {
+                if g {
+                    view.cursor = 0;
+                } else {
+                    view.pending_g = true;
+                }
+            }
+            (KeyCode::Char('G'), _) | (KeyCode::End, _) => {
+                view.cursor = view.item_count().saturating_sub(1)
+            }
+            (KeyCode::Home, _) => view.cursor = 0,
+
+            (KeyCode::Char('J'), _) => view.move_group(1),
+            (KeyCode::Char('K'), _) => view.move_group(-1),
+
+            (KeyCode::Char(' '), _) => view.toggle(),
+            (KeyCode::Char('r'), false) => view.reload(),
+            _ => {}
+        }
+    }
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {

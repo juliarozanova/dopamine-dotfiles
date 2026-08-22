@@ -40,10 +40,16 @@ pub struct Theme {
     pub selection: Color,
     /// text drawn on top of `selection`
     pub inverted: Color,
+    /// an unticked checkbox glyph
+    pub checkbox: Color,
+    /// a ticked checkbox, and the struck-through text beside it
+    pub done: Color,
+    /// the gutter mark on an item whose write hasn't landed yet
+    pub pending: Color,
 }
 
 /// dopamine-dark, used when theme.json is absent or a key is missing.
-const FALLBACK: [(&str, &str); 12] = [
+const FALLBACK: [(&str, &str); 15] = [
     ("fg", "#D7DBDF"),
     ("comment", "#90959B"),
     ("constant", "#CC5E87"),
@@ -56,6 +62,9 @@ const FALLBACK: [(&str, &str); 12] = [
     ("accent", "#E6A46A"),
     ("selection_bg", "#515F6E"),
     ("bg", "#2B343D"),
+    ("ui", "#8A9299"),
+    ("vcs_added", "#C4D27A"),
+    ("warning", "#E6A676"),
 ];
 
 fn fallback(key: &str) -> Color {
@@ -166,6 +175,9 @@ impl Theme {
             accent: role(vars, "accent", "accent"),
             selection: role(vars, "selection_bg", "selection_bg"),
             inverted: role(vars, "bg", "bg"),
+            checkbox: role(vars, "ui", "ui"),
+            done: role(vars, "vcs_added", "vcs_added"),
+            pending: role(vars, "warning", "warning"),
         }
     }
 }
@@ -244,6 +256,7 @@ mod tests {
             ("author", t.author), ("code", t.code), ("code_inline", t.code_inline),
             ("link", t.link), ("rule", t.rule), ("accent", t.accent),
             ("selection", t.selection), ("inverted", t.inverted),
+            ("checkbox", t.checkbox), ("done", t.done), ("pending", t.pending),
         ] {
             assert!(matches!(c, Color::Rgb(..)), "{name} fell through to {c:?}");
         }
@@ -252,9 +265,9 @@ mod tests {
     /// The palette roles `Theme::from_doc` looks up. If chezmoi's palette.toml
     /// renames one of these, the theme silently falls back to dopamine-dark —
     /// so assert the contract against the real generated file.
-    const REQUIRED_ROLES: [&str; 10] = [
+    const REQUIRED_ROLES: [&str; 13] = [
         "fg", "comment", "constant", "special", "tag", "string", "guide_normal", "accent",
-        "selection_bg", "bg",
+        "selection_bg", "bg", "ui", "vcs_added", "warning",
     ];
 
     #[test]
