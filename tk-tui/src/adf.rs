@@ -1,7 +1,8 @@
 //! Minimal ADF (Atlassian Document Format) → ratatui Lines.
 //! Covers the nodes that actually appear in tickets: paragraphs, headings,
-//! bullet/ordered lists, code blocks, blockquotes, rules, hard breaks, and
-//! the strong/em/code/link marks. Unknown nodes fall back to their children.
+//! bullet/ordered lists, task lists (Jira's checkboxes), code blocks,
+//! blockquotes, rules, hard breaks, and the strong/em/code/link marks.
+//! Unknown nodes fall back to their children.
 
 use crate::theme::theme;
 use ratatui::style::{Modifier, Style, Stylize};
@@ -64,6 +65,37 @@ fn blocks(v: &Value, first: &str, rest: &str, out: &mut Vec<Line<'static>>) {
                 let cont = format!("{}{}", rest, " ".repeat(bullet.len() - first.len()));
                 blocks(item, &bullet, &cont, out);
             }
+        }
+        // Jira's action items. Rendered here so a checkbox in the *description*
+        // still reads as a checkbox in the ticket pane; the editable list is
+        // built from the same nodes in todo::jira.
+        "taskList" => {
+            for item in kids(v) {
+                blocks(item, first, rest, out);
+            }
+        }
+        "taskItem" => {
+            let done = v["attrs"]["state"].as_str() == Some("DONE");
+            let (glyph, style) = if done {
+                ("☑ ", Style::default().fg(theme().done))
+            } else {
+                ("☐ ", Style::default().fg(theme().checkbox))
+            };
+            let body: Vec<Span<'static>> = if done {
+                inline_lines(v)
+                    .into_iter()
+                    .flatten()
+                    .map(|s| s.add_modifier(Modifier::CROSSED_OUT))
+                    .collect()
+            } else {
+                inline_lines(v).into_iter().flatten().collect()
+            };
+            let mut line = vec![
+                Span::raw(first.to_string()),
+                Span::styled(glyph.to_string(), style),
+            ];
+            line.extend(body);
+            out.push(Line::from(line));
         }
         "listItem" => {
             let mut f = first.to_string();
@@ -136,6 +168,23 @@ fn inline_lines(v: &Value) -> Vec<Vec<Span<'static>>> {
         return Vec::new();
     }
     lines
+}
+
+/// A node's inline content as plain text, hard breaks flattened to spaces.
+/// Used for checklist item text, where a single line is all there is room for.
+pub fn inline_text(v: &Value) -> String {
+    inline_lines(v)
+        .iter()
+        .map(|spans| {
+            spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
 }
 
 fn styled(text: String, marks: &Value) -> Span<'static> {

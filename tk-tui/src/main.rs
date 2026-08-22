@@ -9,6 +9,7 @@
 mod adf;
 mod app;
 mod jira;
+mod rest;
 mod theme;
 mod todo;
 mod ui;

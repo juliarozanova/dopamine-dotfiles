@@ -1,13 +1,17 @@
 //! The aggregate checklist: one list over every open ticket's TODO section
 //! plus the local file.
 
+pub mod jira;
 pub mod local;
 pub mod model;
 
+use crate::rest::Config;
 use crate::ui::todo as render;
 use anyhow::Result;
 use local::LocalFile;
 use model::{Origin, TodoGroup};
+use serde_json::Value;
+use std::collections::HashMap;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -17,6 +21,14 @@ use ratatui::Frame;
 pub struct TodoView {
     pub groups: Vec<TodoGroup>,
     local: LocalFile,
+    /// None when Jira isn't configured or reachable — the local list still
+    /// works, which is the whole reason the dash pane can't hard-fail.
+    cfg: Option<Config>,
+    /// Each ticket's description exactly as fetched. Write-back mutates a
+    /// clone of this rather than rebuilding a description from the model.
+    docs: HashMap<String, Value>,
+    /// Why the Jira half is missing, shown as a banner rather than an abort.
+    jira_error: Option<String>,
     /// Index into the flattened item list, not into rows.
     pub cursor: usize,
     pub scroll: u16,
@@ -30,6 +42,9 @@ impl TodoView {
         let mut v = Self {
             groups: Vec::new(),
             local,
+            cfg: None,
+            docs: HashMap::new(),
+            jira_error: None,
             cursor: 0,
             scroll: 0,
             status: None,
@@ -39,14 +54,46 @@ impl TodoView {
         Ok(v)
     }
 
-    /// Re-derive the groups from the backends. Cursor is clamped rather than
+    /// Re-derive the groups from both backends. Cursor is clamped rather than
     /// reset, so a refresh doesn't lose your place.
+    ///
+    /// A Jira failure is recorded, not propagated: an expired token should cost
+    /// you the ticket groups and a banner, not the whole pane.
     fn rebuild(&mut self) {
-        self.groups = vec![self.local.group()];
+        let mut groups = vec![self.local.group()];
+        self.docs.clear();
+        self.jira_error = None;
+
+        match self.fetch_jira() {
+            Ok(issues) => {
+                for issue in &issues {
+                    if let Some(d) = &issue.description {
+                        self.docs.insert(issue.key.clone(), d.clone());
+                    }
+                    groups.push(jira::group(issue));
+                }
+            }
+            Err(e) => self.jira_error = Some(format!("{e:#}")),
+        }
+
+        self.groups = groups;
         let n = self.item_count();
         if self.cursor >= n {
             self.cursor = n.saturating_sub(1);
         }
+    }
+
+    fn fetch_jira(&mut self) -> Result<Vec<jira::Issue>> {
+        if self.cfg.is_none() {
+            self.cfg = Some(crate::rest::config()?);
+        }
+        let cfg = self.cfg.as_ref().expect("just set");
+        jira::search(cfg)
+    }
+
+    /// The description a ticket had when we last read it.
+    pub fn doc_for(&self, key: &str) -> Option<&Value> {
+        self.docs.get(key)
     }
 
     pub fn reload(&mut self) {
@@ -54,7 +101,10 @@ impl TodoView {
             Ok(f) => {
                 self.local = f;
                 self.rebuild();
-                self.status = Some("refreshed".into());
+                self.status = Some(match &self.jira_error {
+                    Some(e) => format!("local reloaded — jira: {e}"),
+                    None => "refreshed".into(),
+                });
             }
             Err(e) => self.status = Some(format!("reload failed: {e:#}")),
         }
@@ -160,9 +210,13 @@ impl TodoView {
         );
 
         let th = crate::theme::theme();
-        let footer = match &self.status {
-            Some(s) => Line::styled(format!(" {s}"), Style::default().fg(th.status)),
-            None => Line::from(vec![Span::styled(
+        let footer = match (&self.status, &self.jira_error) {
+            (Some(s), _) => Line::styled(format!(" {s}"), Style::default().fg(th.status)),
+            (None, Some(e)) => Line::styled(
+                format!(" jira unavailable: {e}"),
+                Style::default().fg(th.pending),
+            ),
+            (None, None) => Line::from(vec![Span::styled(
                 " j/k move · J/K group · space done · r refresh · q quit".to_string(),
                 Style::default().fg(th.dim),
             )]),
@@ -184,6 +238,9 @@ mod tests {
         TodoView {
             groups,
             local: LocalFile::load_from("/nonexistent/todo.md".into()).unwrap(),
+            cfg: None,
+            docs: HashMap::new(),
+            jira_error: None,
             cursor: 0,
             scroll: 0,
             status: None,
