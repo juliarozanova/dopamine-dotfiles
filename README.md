@@ -112,6 +112,48 @@ normal mode discards. Comments send with **ZZ**, not `ctrl-s` — `ctrl-s` is
 terminal flow control and never reaches the pane.
 In the fzf pickers: `ctrl-j/k` move, `ctrl-d/u` half-page, `ctrl-f/b` page.
 
+### Where the checklist gets its items
+
+Two places, and only two:
+
+- **In a ticket** — the checkboxes under a heading called `TODO` in the
+  description. Jira's own action items; add them in the browser with `[]` at
+  the start of a line, or press `o` in the checklist and tk writes the heading
+  and the list for you if the ticket hasn't got one yet.
+- **`~/Dashboard/todo.md`** — plain markdown `- [ ]` lines, for work with no
+  ticket. Prose and headings around them are yours; only checkbox lines are
+  ever rewritten, so the file stays something you'd happily open in nvim.
+
+**Checkboxes outside the `TODO` heading are ignored on purpose** — acceptance
+criteria, a checklist in the notes, whatever a colleague added. They still show
+in the ticket pane, they just never reach the global list, so the list stays
+yours.
+
+```
+description                        tk todo
+  ¶ context…                       ─────────────────────────
+  ## Acceptance criteria             JROZ-2  Get FraudGen…
+    ☐ reviewed by two people   ✗       ☐ wire the eval harness
+  ## TODO                              ☑ pin the dataset version
+    ☐ wire the eval harness    ✓
+    ☑ pin the dataset version  ✓
+  ## Notes
+    ☐ ask Sam re: latency      ✗
+```
+
+Tickets are scoped to jira-cli's configured project (`project.key` in
+`~/.config/.jira/.config.yml`), which is what keeps Atlassian's "(Example)"
+sample issues out of your list. `TK_TODO_JQL` overrides the query wholesale if
+you want something else.
+
+**Writing back is surgical.** tk never re-renders a description: it edits the
+fetched document in place and puts the same document back, so tables, panels,
+images, mentions and smart links — anything it has never heard of — come back
+byte-identical. Every write re-reads first and refuses if the item moved on, so
+editing the same ticket in a browser tab can't be silently overwritten. The one
+lossy edit is rewording an item, which flattens formatting *inside that item*;
+an item you open and close without typing is never written back.
+
 If Jira ever returns nothing ("No result found"), it's almost always an
 expired API token — `tk doctor` will tell you and print the regeneration
 steps. The token lives in `~/.config/jira-board/env`, which tk sources on
@@ -145,8 +187,11 @@ new tab):
 
 The `◫ ticket` pane is **tk-tui** (Rust/ratatui): title, description and
 comments only — no metadata noise — with full vim motions and comment
-replies (key table above). It's the same TUI you get anywhere via
-`tk view`, so nothing about it is welded to this layout.
+replies (key table above). **`t`** swaps it for this ticket's checklist and
+back; it's a mode rather than a second pane, because the description already
+contains the TODO section and a second pane would just be showing a slice of
+its neighbour. It's the same TUI you get anywhere via `tk view`, so nothing
+about it is welded to this layout.
 Pane movement is `Alt h/j/k/l`; `Ctrl h` is left free for nvim
 (zellij's move mode lives on `Alt m`).
 
@@ -341,7 +386,7 @@ and `macos_window_background_blur` is simply ignored off macOS.
 
 | path | what |
 |---|---|
-| `dot_local/bin/executable_tk` | the whole workflow: open / view / done / ls / doctor |
+| `dot_local/bin/executable_tk` | the whole workflow: open / view / todo / done / ls / doctor |
 | `tk-tui/` | 🦀 the ratatui TUI (`tk view`, `tk todo`) — ticket pane + checklist, jira-cli `--raw` + ADF renderer, REST for descriptions |
 | `dot_local/bin/executable_tk-todo-float` | what `Alt-t` runs: float the checklist, or toggle it away if it's already up |
 | `run_onchange_before_20-build-tk-tui.sh.tmpl` | `cargo install`s tk-tui on `chezmoi apply` when its source changes |
@@ -349,7 +394,7 @@ and `macos_window_background_blur` is simply ignored off macOS.
 | `dot_local/share/tk/prepare-commit-msg` | ticket-prefix hook (installed per-repo by tk) |
 | `dot_local/share/tk/summary-prompt.md` | the prompt `tk done` pipes into `claude -p` |
 | `dot_config/zellij/templates/ticket.kdl.tpl.tmpl` | per-ticket layout (`$TICKET` baked by tk at open) |
-| `dot_config/zellij/layouts/dash.kdl.tmpl` | home layout — plain `zellij` lands here |
+| `dot_config/zellij/layouts/dash.kdl.tmpl` | home layout — plain `zellij` lands here; `☑ todo` is the expanded right pane |
 | `.chezmoidata/palette.toml` | 🎨 every colour, all three variants — the one file to edit |
 | `dot_config/wezterm/wezterm.lua.tmpl` | terminal schemes + ANSI slots, generated from the palette |
 | `dot_config/nvim/lua/dopamine_palette.lua.tmpl` | the palette as a Lua table, injected into the colorscheme |
