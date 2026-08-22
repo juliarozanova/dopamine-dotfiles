@@ -23,6 +23,9 @@ enum Target {
 struct Edit {
     editor: Editor,
     target: Target,
+    /// The buffer as text, refreshed on every keystroke. Kept here so the
+    /// renderer can borrow it without the editor handing out a temporary.
+    text: String,
 }
 
 /// What the host should do after a key the list didn't fully handle.
@@ -182,6 +185,7 @@ impl ItemList {
         self.editing = Some(Edit {
             editor: Editor::new(&text, mode),
             target: Target::Existing(self.cursor),
+            text,
         });
     }
 
@@ -193,6 +197,7 @@ impl ItemList {
         self.editing = Some(Edit {
             editor: Editor::new("", EditMode::Insert),
             target: Target::New(gi),
+            text: String::new(),
         });
     }
 
@@ -200,7 +205,9 @@ impl ItemList {
         let Some(edit) = self.editing.as_mut() else {
             return false;
         };
-        match edit.editor.key(k) {
+        let outcome = edit.editor.key(k);
+        edit.text = edit.editor.text();
+        match outcome {
             Outcome::Continue => {}
             Outcome::Cancel => {
                 self.editing = None;
@@ -483,7 +490,10 @@ impl ItemList {
                     self.edit_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
                 }
             }
-            (KeyCode::Char('o'), false) => self.new_item(),
+            // `O` too: there's one insertion point per group, so above and
+            // below are the same place — better to accept both than to eat the
+            // keystroke and look broken.
+            (KeyCode::Char('o'), false) | (KeyCode::Char('O'), _) => self.new_item(),
             (KeyCode::Char('p'), false) => self.promote(),
             (KeyCode::Char('d'), false) => {
                 if d {
@@ -506,45 +516,50 @@ impl ItemList {
 
     // ------------------------------------------------------------- draw ---
 
+    /// Describe the in-progress edit to the renderer, so the buffer is drawn
+    /// where the item actually is instead of patched over a row afterwards.
+    fn editing_for_render(&self) -> render::Editing<'_> {
+        let Some(e) = &self.editing else {
+            return render::Editing::None;
+        };
+        let insert = e.editor.mode() == EditMode::Insert;
+        let cursor = e.editor.cursor();
+        match e.target {
+            Target::Existing(nth) => match self.at(nth) {
+                Some((gi, ii)) => render::Editing::Existing {
+                    gi,
+                    ii,
+                    text: &e.text,
+                    cursor,
+                    insert,
+                },
+                None => render::Editing::None,
+            },
+            Target::New(gi) => render::Editing::New {
+                gi,
+                text: &e.text,
+                cursor,
+                insert,
+            },
+        }
+    }
+
     pub fn draw(&mut self, f: &mut Frame, area: Rect) {
         let view_h = area.height;
-        let rows = render::rows(&self.groups);
+        let rows = render::rows(&self.groups, self.editing_for_render());
         let mut lines: Vec<Line> = rows.iter().map(|r| r.line.clone()).collect();
 
-        let editing_row = self.editing.as_ref().and_then(|e| {
-            let nth = match e.target {
-                Target::Existing(nth) => nth,
-                Target::New(gi) => {
-                    self.first_of_group(gi) + self.groups.get(gi).map_or(0, |g| g.items.len())
-                }
-            };
-            let row = render::row_of(&rows, nth).or_else(|| {
-                render::row_of(&rows, nth.saturating_sub(1)).map(|r| r + 1)
-            })?;
-            Some((row, e))
-        });
-        if let Some((row, e)) = editing_row {
-            let line = render::edit_line(
-                &e.editor.text(),
-                e.editor.cursor(),
-                e.editor.mode() == EditMode::Insert,
-            );
-            match lines.get_mut(row) {
-                Some(slot) => *slot = line,
-                None => lines.push(line),
-            }
-        }
-
-        // while picking, the highlight moves to the candidate ticket heading
+        // While editing, the caret is the highlight; while picking, the
+        // highlight moves to the candidate ticket; otherwise it's the cursor.
         let th = crate::theme::theme();
-        let highlight_row = match self.picking {
-            Some((_, gi)) => rows
+        let editing_row = render::editing_row(&rows);
+        let highlight_row = match (editing_row, self.picking) {
+            (Some(r), _) => Some(r),
+            (None, Some((_, gi))) => rows
                 .iter()
                 .position(|r| r.item.map(|(g, _)| g) == Some(gi))
                 .or_else(|| render::row_of(&rows, self.first_of_group(gi))),
-            None => editing_row
-                .map(|(r, _)| r)
-                .or_else(|| render::row_of(&rows, self.cursor)),
+            (None, None) => render::row_of(&rows, self.cursor),
         };
 
         if let Some(row) = highlight_row {
@@ -744,5 +759,193 @@ mod tests {
         assert_eq!(l.picking, Some((0, 1)), "only one ticket to choose from");
         l.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 20);
         assert!(!l.picking());
+    }
+}
+
+/// Render tests. These drive a real terminal buffer rather than the plain-text
+/// dump, because every bug in the first cut of this pane was a rendering bug
+/// the dump could not see: the edit buffer drawn nowhere, and the highlight
+/// never checked at all.
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn item(text: &str, line: usize) -> crate::todo::model::TodoItem {
+        crate::todo::model::TodoItem {
+            text: text.into(),
+            done: false,
+            origin: Origin::Local { line },
+            dirty: false,
+        }
+    }
+
+    fn populated() -> ItemList {
+        let mut l = ItemList::new(None);
+        l.groups = vec![
+            TodoGroup {
+                title: "no ticket".into(),
+                key: None,
+                items: vec![item("first local", 0), item("second local", 1)],
+            },
+            TodoGroup {
+                title: "a ticket".into(),
+                key: Some("JROZ-1".into()),
+                items: vec![item("on the ticket", 0)],
+            },
+        ];
+        l
+    }
+
+    fn empty() -> ItemList {
+        let mut l = ItemList::new(None);
+        l.groups = vec![TodoGroup {
+            title: "no ticket".into(),
+            key: None,
+            items: vec![],
+        }];
+        l
+    }
+
+    /// Everything the terminal actually shows, one string per row.
+    fn render(l: &mut ItemList) -> Vec<String> {
+        let mut term = Terminal::new(TestBackend::new(60, 14)).unwrap();
+        term.draw(|f| {
+            let area = f.area();
+            l.draw(f, area);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// The row painted with the selection background.
+    fn highlighted(l: &mut ItemList) -> Option<String> {
+        let mut term = Terminal::new(TestBackend::new(60, 14)).unwrap();
+        term.draw(|f| {
+            let area = f.area();
+            l.draw(f, area);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let sel = crate::theme::theme().selection;
+        (0..buf.area.height).find_map(|y| {
+            (buf[(0, y)].style().bg == Some(sel)).then(|| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+        })
+    }
+
+    #[test]
+    fn j_and_k_visibly_move_the_highlight() {
+        let mut l = populated();
+        assert!(
+            highlighted(&mut l).unwrap().contains("first local"),
+            "the first item starts highlighted"
+        );
+
+        l.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), 14);
+        assert!(highlighted(&mut l).unwrap().contains("second local"));
+
+        // and across a group boundary
+        l.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), 14);
+        assert!(highlighted(&mut l).unwrap().contains("on the ticket"));
+
+        l.key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE), 14);
+        assert!(highlighted(&mut l).unwrap().contains("second local"));
+    }
+
+    /// The one that mattered: `o` on an empty list used to render nothing at
+    /// all, so you typed blind.
+    #[test]
+    fn o_on_an_empty_list_shows_what_you_are_typing() {
+        let mut l = empty();
+        l.key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE), 14);
+        for c in "buy milk".chars() {
+            l.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), 14);
+        }
+        let screen = render(&mut l).join("\n");
+        assert!(
+            screen.contains("buy milk"),
+            "the buffer must be on screen while typing; got:\n{screen}"
+        );
+        assert!(
+            !screen.contains("nothing yet"),
+            "the placeholder must give way to the new item"
+        );
+    }
+
+    #[test]
+    fn capital_o_starts_a_new_item_too() {
+        for key in ['o', 'O'] {
+            let mut l = empty();
+            l.key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE), 14);
+            for c in "typed".chars() {
+                l.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), 14);
+            }
+            assert!(
+                render(&mut l).join("\n").contains("typed"),
+                "{key} must open an item you can see"
+            );
+        }
+    }
+
+    #[test]
+    fn a_new_item_is_typed_at_the_end_of_its_own_group() {
+        let mut l = populated();
+        l.key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE), 14);
+        for c in "third".chars() {
+            l.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), 14);
+        }
+        let screen = render(&mut l);
+        let at = screen.iter().position(|r| r.contains("third")).expect("on screen");
+        let second = screen.iter().position(|r| r.contains("second local")).unwrap();
+        let ticket = screen.iter().position(|r| r.contains("JROZ-1")).unwrap();
+        assert!(
+            second < at && at < ticket,
+            "the new row belongs after its group's last item and before the next group:\n{screen:#?}"
+        );
+        // and it must not have eaten an existing row
+        assert!(screen.iter().any(|r| r.contains("on the ticket")));
+    }
+
+    #[test]
+    fn editing_an_item_shows_the_buffer_in_that_items_place() {
+        let mut l = populated();
+        l.cursor = 1;
+        l.key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE), 14);
+        for c in "!!".chars() {
+            l.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), 14);
+        }
+        let screen = render(&mut l);
+        let at = screen
+            .iter()
+            .position(|r| r.contains("second local!!"))
+            .expect("the edited text is on screen");
+        let first = screen.iter().position(|r| r.contains("first local")).unwrap();
+        assert_eq!(at, first + 1, "it stays in its own row");
+        assert!(screen.iter().any(|r| r.contains("on the ticket")), "nothing else moved");
+    }
+
+    #[test]
+    fn the_checklist_renders_its_groups_and_boxes() {
+        let mut l = populated();
+        let screen = render(&mut l);
+        assert!(screen.iter().any(|r| r.contains("no ticket")));
+        assert!(screen.iter().any(|r| r.contains("JROZ-1")));
+        assert!(screen.iter().filter(|r| r.contains('☐')).count() == 3);
     }
 }

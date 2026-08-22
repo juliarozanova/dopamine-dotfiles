@@ -1,7 +1,7 @@
 //! Rendering: ticket → styled lines (Segments), and the per-frame draw.
 
 use crate::adf;
-use crate::app::{App, Mode};
+use crate::app::{App, Focus, Mode};
 use crate::jira::Ticket;
 use crate::theme::theme;
 use ratatui::layout::{Constraint, Layout};
@@ -89,13 +89,34 @@ pub fn compose_height(mode: &Mode) -> u16 {
     }
 }
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::vertical([
         Constraint::Min(1),
         Constraint::Length(compose_height(&app.mode)),
         Constraint::Length(1),
     ])
     .split(f.area());
+
+    // TODO mode: the same checklist widget as `tk todo`, over this one ticket
+    if app.focus == Focus::Todo {
+        let head = Line::from(vec![
+            Span::styled(
+                app.key.clone(),
+                Style::default().fg(theme().key).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  TODO".to_string(), dim()),
+        ]);
+        let body = Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).split(chunks[0]);
+        f.render_widget(Paragraph::new(head), body[0]);
+        app.todo.draw(f, body[1]);
+
+        let footer = match &app.todo.status {
+            Some(s) => Line::styled(format!(" {s}"), Style::default().fg(theme().status)),
+            None => Line::styled(app.todo.hint(), dim()),
+        };
+        f.render_widget(Paragraph::new(footer), chunks[2]);
+        return;
+    }
 
     // body, with the selected comment header reversed
     let mut lines = app.segs.lines.clone();
@@ -175,7 +196,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let footer = match &app.status {
         Some(s) => Line::styled(format!(" {s}"), Style::default().fg(theme().status)),
         None => Line::styled(
-            " j/k scroll · u/d ½page · gg/G · J/K comment · r refresh · c comment · R reply · w web · q quit",
+            " j/k scroll · u/d ½page · gg/G · J/K comment · t todo · r refresh · c comment · R reply · w web · q quit",
             dim(),
         ),
     };
@@ -188,7 +209,7 @@ mod tests {
     use crate::jira::Comment;
     use serde_json::json;
 
-    fn ticket() -> Ticket {
+    pub(super) fn ticket_fixture() -> Ticket {
         Ticket {
             key: "FRD-123".into(),
             summary: "a summary".into(),
@@ -238,7 +259,7 @@ mod tests {
 
     #[test]
     fn header_and_comment_styles_come_from_the_theme() {
-        let segs = build(&ticket());
+        let segs = build(&ticket_fixture());
         let th = theme();
 
         let header = &segs.lines[0];
@@ -258,7 +279,7 @@ mod tests {
 
     #[test]
     fn adf_marks_come_from_the_theme() {
-        let segs = build(&ticket());
+        let segs = build(&ticket_fixture());
         let th = theme();
 
         assert_eq!(find(&segs, "inline").style.fg, Some(th.code_inline));
@@ -273,7 +294,7 @@ mod tests {
     /// bare text — the same nodes the checklist is built from.
     #[test]
     fn task_items_render_as_checkboxes() {
-        let segs = build(&ticket());
+        let segs = build(&ticket_fixture());
         let th = theme();
 
         let open = find_line(&segs, "an open task");
@@ -293,12 +314,119 @@ mod tests {
     /// window_background_opacity can't show through — the same trap nvim hit.
     #[test]
     fn nothing_in_the_body_paints_a_background() {
-        let segs = build(&ticket());
+        let segs = build(&ticket_fixture());
         for (i, line) in segs.lines.iter().enumerate() {
             assert_eq!(line.style.bg, None, "line {i} paints a background");
             for span in &line.spans {
                 assert_eq!(span.style.bg, None, "a span on line {i} paints a background");
             }
         }
+    }
+}
+
+/// Frame-level tests for the pane itself. `t` used to flip a field that
+/// nothing rendered, so the mode existed only in the state.
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use crate::app::Focus;
+    use crate::editor::{EditMode, Editor};
+    use crate::todo::list::ItemList;
+    use crate::todo::model::{Origin, TodoGroup, TodoItem};
+    use crate::ui::build;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn app() -> App {
+        let ticket = super::tests::ticket_fixture();
+        let segs = build(&ticket);
+        let mut todo = ItemList::new(None);
+        todo.groups = vec![TodoGroup {
+            title: ticket.summary.clone(),
+            key: Some("FRD-123".into()),
+            items: vec![TodoItem {
+                text: "an open task".into(),
+                done: false,
+                origin: Origin::Jira {
+                    key: "FRD-123".into(),
+                    local_id: "a1".into(),
+                },
+                dirty: false,
+            }],
+        }];
+        App {
+            key: "FRD-123".into(),
+            ticket,
+            segs,
+            scroll: 0,
+            sel: None,
+            mode: Mode::Normal,
+            input: Editor::new("", EditMode::Insert),
+            status: None,
+            pending_g: false,
+            focus: Focus::Full,
+            todo,
+        }
+    }
+
+    fn screen(app: &mut App) -> Vec<String> {
+        let mut term = Terminal::new(TestBackend::new(70, 16)).unwrap();
+        term.draw(|f| draw(f, app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn t_actually_swaps_the_pane_for_the_checklist() {
+        let mut a = app();
+
+        let full = screen(&mut a).join("\n");
+        assert!(full.contains("a summary"), "the ticket body is showing");
+        assert!(full.contains("comment"), "…and its comments");
+
+        a.key(
+            ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Char('t'),
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ),
+            14,
+        );
+        let todo = screen(&mut a).join("\n");
+        assert!(todo.contains("an open task"), "the checklist is showing:\n{todo}");
+        assert!(!todo.contains("comment"), "the comments are not:\n{todo}");
+        assert!(todo.contains("TODO"), "and it says what it is");
+
+        // and back again, with the description position kept
+        a.key(
+            ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Char('t'),
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ),
+            14,
+        );
+        assert!(screen(&mut a).join("\n").contains("a summary"));
+    }
+
+    #[test]
+    fn the_footer_advertises_the_todo_toggle() {
+        let mut a = app();
+        let footer = screen(&mut a).last().unwrap().clone();
+        assert!(footer.contains("t todo"), "hotkey hints must mention it: {footer:?}");
+    }
+
+    #[test]
+    fn the_checklist_footer_replaces_the_ticket_hints() {
+        let mut a = app();
+        a.focus = Focus::Todo;
+        let footer = screen(&mut a).last().unwrap().clone();
+        assert!(footer.contains("space done"), "checklist hints: {footer:?}");
     }
 }

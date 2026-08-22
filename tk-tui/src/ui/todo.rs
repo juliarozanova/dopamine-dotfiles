@@ -11,6 +11,32 @@ use ratatui::text::{Line, Span};
 pub struct Row {
     pub line: Line<'static>,
     pub item: Option<(usize, usize)>,
+    /// The row holding the live edit buffer, if any.
+    pub editing: bool,
+}
+
+/// The in-progress edit, so the buffer is rendered *in place* rather than
+/// patched over a row afterwards. A new item has no index to look up yet —
+/// getting that wrong is why it used to render nowhere at all on an empty
+/// list, and over the next group's row otherwise.
+#[derive(Clone, Copy)]
+pub enum Editing<'a> {
+    None,
+    /// Replacing the text of an existing item.
+    Existing {
+        gi: usize,
+        ii: usize,
+        text: &'a str,
+        cursor: usize,
+        insert: bool,
+    },
+    /// A new item, appended to group `gi`.
+    New {
+        gi: usize,
+        text: &'a str,
+        cursor: usize,
+        insert: bool,
+    },
 }
 
 fn dim() -> Style {
@@ -27,9 +53,18 @@ fn gutter(dirty: bool) -> Span<'static> {
     }
 }
 
-pub fn rows(groups: &[TodoGroup]) -> Vec<Row> {
+pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
     let mut out = Vec::new();
-    let plain = |l: Line<'static>| Row { line: l, item: None };
+    let plain = |l: Line<'static>| Row {
+        line: l,
+        item: None,
+        editing: false,
+    };
+    let edit_row = |text: &str, cursor: usize, insert: bool| Row {
+        line: edit_line(text, cursor, insert),
+        item: None,
+        editing: true,
+    };
 
     for (gi, g) in groups.iter().enumerate() {
         if gi > 0 {
@@ -59,7 +94,9 @@ pub fn rows(groups: &[TodoGroup]) -> Vec<Row> {
         ));
         out.push(plain(Line::from(head)));
 
-        if g.items.is_empty() {
+        let adding = matches!(editing, Editing::New { gi: g2, .. } if g2 == gi);
+
+        if g.items.is_empty() && !adding {
             out.push(plain(Line::from(vec![
                 Span::raw("   "),
                 Span::styled("(nothing yet — o to add)".to_string(), dim()),
@@ -68,6 +105,13 @@ pub fn rows(groups: &[TodoGroup]) -> Vec<Row> {
         }
 
         for (ii, it) in g.items.iter().enumerate() {
+            // an item being reworded shows its buffer in its own place
+            if let Editing::Existing { gi: g2, ii: i2, text, cursor, insert } = editing {
+                if g2 == gi && i2 == ii {
+                    out.push(edit_row(text, cursor, insert));
+                    continue;
+                }
+            }
             let (glyph, glyph_style, text_style) = if it.done {
                 (
                     "☑",
@@ -90,7 +134,15 @@ pub fn rows(groups: &[TodoGroup]) -> Vec<Row> {
                     Span::styled(it.text.clone(), text_style),
                 ]),
                 item: Some((gi, ii)),
+                editing: false,
             });
+        }
+
+        // a new item lands at the end of its group, as an extra row
+        if let Editing::New { text, cursor, insert, .. } = editing {
+            if adding {
+                out.push(edit_row(text, cursor, insert));
+            }
         }
     }
 
@@ -136,8 +188,13 @@ pub fn edit_line(text: &str, cursor: usize, insert: bool) -> Line<'static> {
     ])
 }
 
+/// The row holding the edit buffer, for scrolling it into view.
+pub fn editing_row(rows: &[Row]) -> Option<usize> {
+    rows.iter().position(|r| r.editing)
+}
+
 pub fn plain_dump(groups: &[TodoGroup]) -> Vec<String> {
-    rows(groups)
+    rows(groups, Editing::None)
         .iter()
         .map(|r| crate::ui::line_text(&r.line).trim_end().to_string())
         .collect()
@@ -174,14 +231,14 @@ mod tests {
 
     #[test]
     fn only_item_rows_are_selectable() {
-        let rs = rows(&groups());
+        let rs = rows(&groups(), Editing::None);
         let selectable: Vec<_> = rs.iter().filter_map(|r| r.item).collect();
         assert_eq!(selectable, vec![(0, 0), (1, 0), (1, 1)]);
     }
 
     #[test]
     fn row_of_walks_items_not_rows() {
-        let rs = rows(&groups());
+        let rs = rows(&groups(), Editing::None);
         // the third item is the ticked one in the second group
         let r = row_of(&rs, 2).unwrap();
         assert_eq!(rs[r].item, Some((1, 1)));
@@ -189,7 +246,7 @@ mod tests {
 
     #[test]
     fn done_items_are_ticked_struck_and_quiet() {
-        let rs = rows(&groups());
+        let rs = rows(&groups(), Editing::None);
         let done = &rs[row_of(&rs, 2).unwrap()].line;
         let glyph = &done.spans[2];
         assert_eq!(glyph.content, "☑");
@@ -203,7 +260,7 @@ mod tests {
     fn the_dirty_gutter_does_not_shift_the_text() {
         let mut gs = groups();
         gs[0].items[0].dirty = true;
-        let rs = rows(&gs);
+        let rs = rows(&gs, Editing::None);
         let dirty = &rs[row_of(&rs, 0).unwrap()].line;
         assert_eq!(dirty.spans[0].content, "·");
         assert_eq!(dirty.spans[0].content.chars().count(), 1);
@@ -214,7 +271,7 @@ mod tests {
     /// through, so only the selected row (painted at draw time) may set one.
     #[test]
     fn nothing_in_the_list_paints_a_background() {
-        for (i, r) in rows(&groups()).iter().enumerate() {
+        for (i, r) in rows(&groups(), Editing::None).iter().enumerate() {
             assert_eq!(r.line.style.bg, None, "row {i} paints a background");
             for s in &r.line.spans {
                 assert_eq!(s.style.bg, None, "a span on row {i} paints a background");

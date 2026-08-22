@@ -101,9 +101,9 @@ fetched.)
 browser, `q` quit.
 
 **Inside the checklist** (`tk todo`, or `t` in the ticket TUI): `j/k` move,
-`J/K` jump group, **space** tick, **i** edit text, **o** new item,
-**dd** delete, **p** promote a local item onto a ticket, **⏎** open the
-ticket an item belongs to, **r** refresh, `q` quit.
+`J/K` jump group, **space** tick, **i** edit text, **o**/**O** new item in
+the group you're in, **dd** delete, **p** promote a local item onto a ticket,
+**⏎** open the ticket an item belongs to, **r** refresh, `q` quit.
 
 **Editing text** anywhere in tk is modal — the same small vim in the
 checklist and the comment box: `hjkl w b e 0 ^ $ f t` motions, `d`/`c` plus a
@@ -201,8 +201,9 @@ Pane movement is `Alt h/j/k/l`; `Ctrl h` is left free for nvim
   conversation *in that directory* — so each worktree keeps its own thread.
 - `r` in the ticket TUI re-pulls ticket text/comments. `t` swaps it for this
   ticket's checklist and back, keeping your place in the description.
-- `Alt-t` floats the global checklist over whatever you're doing; `Alt-t`
-  again dismisses it. `tk ls` lists open worktrees.
+- `Alt-t` floats the global checklist over whatever you're doing; `q` closes
+  it, and stock `Alt-f` hides/shows the floating layer without closing it.
+  `tk ls` lists open worktrees.
 - `Ctrl o w` (zellij session manager) is your ticket switcher; sessions
   survive reboots via session serialization.
 
@@ -388,7 +389,6 @@ and `macos_window_background_blur` is simply ignored off macOS.
 |---|---|
 | `dot_local/bin/executable_tk` | the whole workflow: open / view / todo / done / ls / doctor |
 | `tk-tui/` | 🦀 the ratatui TUI (`tk view`, `tk todo`) — ticket pane + checklist, jira-cli `--raw` + ADF renderer, REST for descriptions |
-| `dot_local/bin/executable_tk-todo-float` | what `Alt-t` runs: float the checklist, or toggle it away if it's already up |
 | `run_onchange_before_20-build-tk-tui.sh.tmpl` | `cargo install`s tk-tui on `chezmoi apply` when its source changes |
 | `dot_local/bin/executable_paper` | arXiv → knowledge note |
 | `dot_local/share/tk/prepare-commit-msg` | ticket-prefix hook (installed per-repo by tk) |

@@ -14,12 +14,23 @@ keybinds {
         bind "Alt j" { MoveFocus "down"; }
         bind "Alt k" { MoveFocus "up"; }
 
-        // Alt-t: the global checklist as a floating pane, from any session —
-        // including from inside a ticket. tk-todo-float toggles an existing
-        // pane rather than stacking a second copy. Stock zellij leaves Alt-t
-        // unbound (it uses Alt-n/f/[/]/+/-) and WezTerm defines no key table,
-        // so nothing else wants it.
-        bind "Alt t" { Run "tk-todo-float"; }
+        // Alt-t: the global checklist, floating, from any session — including
+        // from inside a ticket. Run opens the command in a pane of its own, so
+        // it has to *be* the checklist; wrapping it in a helper script just
+        // gets you a spare pane whose only job is to open another one.
+        // close_on_exit means `q` in the checklist disposes of the pane, and
+        // stock Alt-f hides/shows the floating layer without closing it.
+        // Stock zellij leaves Alt-t unbound (it uses Alt-n/f/[/]/+/-) and
+        // WezTerm defines no key table, so nothing else wants it.
+        bind "Alt t" {
+            Run "tk" "todo" {
+                floating true
+                name "☑ todo"
+                width "70%"
+                height "85%"
+                close_on_exit true
+            }
+        }
     }
 }
 
