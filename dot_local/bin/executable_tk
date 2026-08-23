@@ -233,7 +233,15 @@ cmd_todo() {
 }
 
 cmd_ls() {
-  find "$WORK" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+  # A shell loop rather than `find -printf`: that's a GNU extension, so it
+  # prints nothing on BSD find (macOS) and on drop-ins like bfs, and with
+  # `set -o pipefail` the whole command then exits non-zero for no visible
+  # reason. This works the same everywhere.
+  local d
+  for d in "$WORK"/*/; do
+    [ -d "$d" ] || continue   # `continue`, not `&&`: a failed test as the last
+    basename "$d"             # statement would make the whole loop exit 1
+  done | sort
 }
 
 cmd_doctor() {

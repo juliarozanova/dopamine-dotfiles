@@ -12,40 +12,72 @@ One Jira ticket = one git worktree = one zellij session = one Claude context.
     └── tickets/  per-ticket learnings, appended by tk done
 ```
 
-## Tonight (machine with this folder)
+## Install
 
-```sh
-cd dopamine-dotfiles
-gh repo create dopamine-dotfiles --private --source=. --push
-```
-
-## Tomorrow morning (laptop)
+One command on a new machine:
 
 ```sh
 sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply <you>/dopamine-dotfiles
-tk doctor        # shows what's left to install
-jira init        # jira-cli auth: pick "API token", paste a Jira PAT
 ```
 
-(or clone and run `./install.sh`.) Zellij chrome is the stock built-in
-tab-bar + status-bar, coloured by the dopamine theme — no plugins to fetch.
+…or from a clone, `./install.sh`. Then:
+
+```sh
+tk doctor        # what's still missing, and whether Jira auth actually works
+jira init        # jira-cli auth: choose "API token", paste a Jira API token
+zellij           # lands on the dash
+```
+
+`chezmoi apply` is the whole install: it writes the configs, clones the
+colorscheme to `~/.local/share/dopamine-light`, builds `tk-tui` with cargo, and
+creates the `~/Dashboard` skeleton. It skips the build cleanly if cargo isn't
+there yet, so you can install dependencies in any order and re-run.
+
+Two secrets aren't in this repo and never should be:
+`~/.config/jira-board/env` holding `export JIRA_API_TOKEN=…` (tk sources it on
+every run), and whatever `jira init` writes to `~/.config/.jira/.config.yml`.
 
 ### Dependencies
 
-Required: `git nvim zellij jira fzf jq lazygit claude gettext` (envsubst),
-and `rust` (cargo — builds `tk-tui` on `chezmoi apply`).
+Required: `git nvim zellij jira fzf jq lazygit claude curl gettext` (envsubst),
+plus `cargo` — it builds `tk-tui` on `chezmoi apply`.
 Delightful: `gh` + [gh-dash](https://github.com/dlvhdr/gh-dash), `yazi`,
 `glow`, `bat`, `onefetch`, `starship`, `presenterm`.
 
+**macOS**
+
 ```sh
 brew install git neovim zellij ankitpokhrel/jira-cli/jira-cli fzf jq \
-             lazygit gh yazi glow bat onefetch starship gettext
+             lazygit gh yazi glow bat onefetch starship gettext rust
 gh extension install dlvhdr/gh-dash
 npm install -g @anthropic-ai/claude-code
 ```
 
-On apt-based WSL, most of the above exist via `apt`/`brew` on Linux;
-zellij and yazi are easiest from their GitHub release binaries or `cargo`.
+**Ubuntu / WSL.** apt has the common ones; zellij, yazi and jira-cli are too
+new for most releases, so take them from cargo or upstream binaries.
+
+```sh
+sudo apt update && sudo apt install -y \
+     git neovim fzf jq curl gettext-base build-essential unzip
+
+# rust (also builds tk-tui on chezmoi apply)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+. "$HOME/.cargo/env"
+cargo install zellij yazi-fm yazi-cli
+
+# lazygit, gh, jira-cli: upstream releases
+sudo snap install lazygit || cargo install --locked gitui   # either works
+sudo apt install -y gh || sudo snap install gh
+curl -sL "$(curl -s https://api.github.com/repos/ankitpokhrel/jira-cli/releases/latest \
+  | jq -r '.assets[].browser_download_url | select(endswith("linux_x86_64.tar.gz"))')" \
+  | tar xz -C /tmp && sudo install /tmp/jira_*/bin/jira /usr/local/bin/jira
+
+gh extension install dlvhdr/gh-dash
+npm install -g @anthropic-ai/claude-code   # needs node
+```
+
+`apt install neovim` is often old enough to upset LazyVim; if `tk doctor` is
+happy but plugins misbehave, take neovim from its own PPA or an AppImage.
 
 ## Applying changes — the chezmoi loop
 
@@ -77,11 +109,11 @@ has never written, like a config you'd been hand-editing — `apply` stops and a
 rather than clobbering it. When you do mean to take the repo's version:
 `chezmoi apply --force <target>`.
 
-One thing happens on apply beyond writing files:
+Two things happen on apply beyond writing files:
 `run_onchange_before_20-build-tk-tui.sh.tmpl` re-runs `cargo install` whenever
-tk-tui's sources change. (`.chezmoiexternal.toml` declares no externals — it's
-just a commented-out recipe for vendoring the colorscheme, so nothing is
-fetched.)
+tk-tui's sources change, and `.chezmoiexternal.toml` clones the dopamine
+colorscheme to `~/.local/share/dopamine-light` (refreshed weekly) so nvim is
+themed on a machine with no dev checkout.
 
 ## tk — command reference
 
@@ -392,8 +424,31 @@ Which means **off macOS, `variant` really is the global light switch** — set i
 `chezmoi apply`, restart. (On macOS it stays the two-mover described above.)
 
 Nothing else assumes a platform: the tk-tui build script skips cleanly when
-`cargo` is absent, tk-tui opens tickets through `jira open` rather than `open(1)`,
-and `macos_window_background_blur` is simply ignored off macOS.
+`cargo` is absent, tk-tui opens tickets through `jira open` rather than
+`open(1)`, `tk` avoids GNU-only `find` flags, and
+`macos_window_background_blur` is simply ignored off macOS.
+
+**Four things WSL specifically needs**, none of them repo changes:
+
+- **WezTerm's config lives on the Windows side.** WezTerm runs as a Windows
+  app and reads `%USERPROFILE%\.wezterm.lua`, not the copy `chezmoi apply`
+  writes inside WSL. Point Windows at the rendered file — a one-line
+  `~/.wezterm.lua` on Windows doing
+  `return dofile('\\\\wsl$\\Ubuntu\\home\\<you>\\.config\\wezterm\\wezterm.lua')` —
+  or just use Windows Terminal and accept its own colours. Everything else
+  (nvim, zellij, yazi, tk-tui) is themed inside WSL and unaffected.
+- **`jira open` needs a browser bridge.** `sudo apt install wslu` gives
+  `wslview`, which xdg-open then routes to your Windows browser. Without it
+  `w` in the ticket pane does nothing.
+- **Clipboard.** zellij's `copy_on_select` wants a clipboard command; install
+  `wl-clipboard` (WSLg) or `xclip`, or set zellij's `copy_command` to
+  `clip.exe`.
+- **Glyphs.** The panes use `☑ ◫ ✳ ⎇ ⚑`; pick a Nerd Font in whichever
+  terminal you're using or they render as boxes.
+
+Keep the repo on the Linux filesystem (`~/dopamine-dotfiles`), not under
+`/mnt/c`. Windows-mounted paths lose the executable bit, which matters for
+everything in `dot_local/bin/`, and they are dramatically slower for git.
 
 ## Anatomy
 
@@ -407,6 +462,8 @@ and `macos_window_background_blur` is simply ignored off macOS.
 | `dot_local/share/tk/summary-prompt.md` | the prompt `tk done` pipes into `claude -p` |
 | `dot_config/zellij/templates/ticket.kdl.tpl.tmpl` | per-ticket layout (`$TICKET` baked by tk at open) |
 | `dot_config/zellij/layouts/dash.kdl.tmpl` | home layout — plain `zellij` lands here; `☑ todo` is the expanded right pane |
+| `dot_config/zellij/config.kdl` | keybinds — `Alt hjkl` movement, `Alt t` for the checklist |
+| `run_once_before_10-dashboard.sh` | builds the `~/Dashboard` skeleton and seeds `todo.md` |
 | `.chezmoidata/palette.toml` | 🎨 every colour, all three variants — the one file to edit |
 | `dot_config/wezterm/wezterm.lua.tmpl` | terminal schemes + ANSI slots, generated from the palette |
 | `dot_config/nvim/lua/dopamine_palette.lua.tmpl` | the palette as a Lua table, injected into the colorscheme |
@@ -419,9 +476,9 @@ and `macos_window_background_blur` is simply ignored off macOS.
 | `.chezmoitemplates/yazi-flavor.toml` | shared yazi flavour body, rendered once per variant |
 | `.chezmoitemplates/yazi-tmtheme.xml` | shared preview tmTheme, scopes mapped like the nvim scheme |
 
-Optional zellij keybinding for a floating ticket pane from anywhere
-(add inside the `keybinds { shared_except "locked" { … } }` block):
-
-```kdl
-bind "Alt y" { Run "tk" "view" "--float" { floating true; }; }
-```
+Want the same treatment for the ticket pane? Declare it in the ticket layout
+next to `☑ todo` and bind a key to `ToggleFloatingPanes`, the way `Alt t`
+works. Don't reach for `bind "Alt y" { Run "tk" "view"; }` — zellij's `Run`
+opens a **new** pane every time it fires, so each press stacks another copy
+until the floating layer is unusable. Declaring the pane once and toggling it
+is the difference between a key you can lean on and one you can't.

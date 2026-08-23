@@ -10,7 +10,9 @@
 {{- end }}
 set -e
 if ! command -v cargo >/dev/null 2>&1; then
-  echo "tk-tui: cargo not found — skipping build (brew install rust, then chezmoi apply)"
+  echo "tk-tui: cargo not found — skipping build."
+  echo "        install rust, then re-run: chezmoi apply"
+  echo "        macOS: brew install rust   ·   else: https://rustup.rs"
   exit 0
 fi
 echo "tk-tui: building (cargo install, first run takes a minute)…"
