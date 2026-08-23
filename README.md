@@ -122,7 +122,7 @@ themed on a machine with no dev checkout.
 | `tk` | fzf-pick one of your open Jira tickets, then open it |
 | `tk FRD-123` | open (create if needed) worktree + zellij session for a ticket |
 | `tk view [KEY] [--float]` | **the ticket TUI** (tk-tui) in this terminal; `--float` = zellij floating pane. KEY inferred from cwd → session name → picker. `tk tui` is an alias |
-| `tk todo` | **the global checklist**: the `TODO` section of every open assigned ticket, plus `~/Dashboard/todo.md`, in one editable list. `Alt-t` floats it from any session |
+| `tk todo [--float]` | **the global checklist**: the `TODO` section of every open assigned ticket, plus `~/Dashboard/todo.md`, in one editable list. In a ticket session `Alt-t` toggles it; `--float` opens one anywhere else |
 | `tk done [KEY]` | Claude-summarise the branch work → confirm → post as Jira comment + log learnings |
 | `tk ls` | list ticket worktrees |
 | `tk doctor` | check dependencies **and live Jira auth** — run this first when anything misbehaves |
@@ -162,8 +162,8 @@ Two places, and only two:
 Items can be **nested**, to any depth. Jira's action items nest natively and
 `todo.md` uses two spaces per level, so indentation is a first-class part of
 both formats rather than something tk layers on top — indent something in the
-browser and the pane shows it, indent it with **tab** here and the ticket has
-it. Outdenting brings an item's sub-items with it.
+browser and the pane shows it, press **>>** here and the ticket has it.
+Outdenting brings an item's sub-items with it.
 
 **Checkboxes outside the `TODO` heading are ignored on purpose** — acceptance
 criteria, a checklist in the notes, whatever a colleague added. They still show
@@ -345,11 +345,16 @@ except on the terracotta `markup`, which is dark enough to want white instead.
 The four remaining sub-3:1 pairs in light are accent-coloured text on the page,
 the same trade dopamine-light already makes in nvim.
 
-**nvim** — the scheme is a local checkout, wired up in
+**nvim** — the scheme comes from its own repo, wired up in
 `dot_config/nvim/lua/plugins/colorscheme.lua`:
 
 ```lua
-{ "juliarozanova/dopamine-light", dir = "~/Dashboard/Code/dopamine-light",
+-- a dev checkout if you have one, else the clone chezmoi vendors
+local dev = vim.fn.expand("~/Dashboard/Code/dopamine-light")
+local vendored = vim.fn.expand("~/.local/share/dopamine-light")
+local scheme_dir = vim.fn.isdirectory(dev) == 1 and dev or vendored
+
+{ "juliarozanova/dopamine-light", dir = scheme_dir,
   lazy = false, priority = 1000,
   config = function()
     local ok, palette = pcall(require, "dopamine_palette")
@@ -358,9 +363,11 @@ the same trade dopamine-light already makes in nvim.
 -- lualine: require('lualine').setup({ options = { theme = 'dopamine' } })
 ```
 
-The `pcall` means the plugin still works standalone on its built-in colours if
-`dopamine_palette.lua` isn't there yet (fresh machine, or nvim config used
-without chezmoi).
+Two fallbacks, and both matter on a fresh box: the `dir` prefers a dev checkout
+so edits to the scheme show up on restart, but drops to the vendored clone when
+`~/Dashboard/Code` doesn't exist — which is the normal case on WSL. And the
+`pcall` means the plugin still works on its own built-in colours if
+`dopamine_palette.lua` isn't there yet (nvim config used without chezmoi).
 
 ### Switching dark ⇄ light
 
@@ -372,7 +379,7 @@ macOS toggle and it changes live — no `chezmoi apply`, no restart:
 | WezTerm | `window-config-reloaded` + `get_appearance()` |
 | Neovim | checks `AppleInterfaceStyle` on focus + a 5s timer (`lua/config/autocmds.lua`) — **macOS only** |
 | yazi | asks the terminal for its background colour |
-| tk-tui | reads the appearance at startup — each `tk view` is a fresh process |
+| tk-tui | reads the appearance at startup — each `tk view` / `tk todo` is a fresh process |
 
 Two can't ask the OS anything, so they follow `[theme] variant` in
 `.chezmoidata/palette.toml`:
