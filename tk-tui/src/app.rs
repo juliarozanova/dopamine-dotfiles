@@ -235,6 +235,7 @@ impl App {
                     self.reload();
                     Action::None
                 }
+                ListAction::Search => Action::Search,
                 // already looking at the ticket
                 ListAction::Open(_) | ListAction::None => Action::None,
             };

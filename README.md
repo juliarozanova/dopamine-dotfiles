@@ -140,6 +140,19 @@ drag it and a single **>** or **<** to shift the lot), **dd** delete, **p** prom
 **⏎** open the ticket you're on — the full ticket pane, from an item or from
 the group heading — **esc** back to the list, **r** refresh, `q` close.
 
+**/** hands the whole pane to **fzf** and jumps the cursor to whatever you
+pick — the same fuzzy engine and the same `ctrl-j/k` bindings as `tk`'s ticket
+picker, so there is nothing new to learn and no matcher of tk's own to get
+subtly wrong. Each line carries its ticket key, so `jroz-2 cache` narrows to
+one item on one ticket; `esc` comes back having moved nothing.
+
+**h** shows only what's left to do, and again shows everything. A done item
+with unfinished children stays visible — ticking a parent isn't a claim about
+the work under it — and a ticket whose items are all done stays listed as
+*(all done ✨)* rather than vanishing. Group headings always say `N open`, so
+nothing goes missing quietly. It's a view setting: neither backend hears about
+it, and it lasts as long as the pane.
+
 **Editing text** anywhere in tk is modal — the same small vim in the
 checklist and the comment box: `hjkl w b e 0 ^ $ f t` motions, `d`/`c` plus a
 motion, `x D C s`, `i a I A`, `u` undo. `⏎` (or `ZZ`) saves, `esc` from

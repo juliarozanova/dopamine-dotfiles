@@ -42,6 +42,9 @@ pub enum ListAction {
     Open(String),
     /// Reload from the backends.
     Reload,
+    /// Hand the terminal to fzf and jump to whatever comes back. The list
+    /// can't do this itself — the event loop owns the terminal.
+    Search,
 }
 
 pub struct ItemList {
@@ -62,6 +65,9 @@ pub struct ItemList {
     editing: Option<Edit>,
     /// Choosing a ticket to promote a local item into.
     picking: Option<(usize, usize)>, // (flat item index, highlighted group)
+    /// Show only what's left to do. A view setting, nothing more — it lasts
+    /// as long as the pane and touches neither backend.
+    hide_done: bool,
     syncer: Option<Sync>,
     in_flight: usize,
 }
@@ -80,6 +86,7 @@ impl ItemList {
             visual: None,
             editing: None,
             picking: None,
+            hide_done: false,
             syncer: None,
             in_flight: 0,
         }
@@ -118,7 +125,7 @@ impl ItemList {
     /// Every position the cursor can occupy, in display order — including one
     /// per empty group, so a ticket with no checkboxes is still reachable.
     fn selectables(&self) -> Vec<Sel> {
-        render::selectables(&self.groups)
+        render::selectables(&self.groups, self.hide_done)
     }
 
     pub fn target_count(&self) -> usize {
@@ -184,6 +191,25 @@ impl ItemList {
         self.queue(op);
     }
 
+    /// Show only unfinished items, or everything again.
+    ///
+    /// The cursor is kept on its item where possible: hiding the done ones is
+    /// something you do *while* working down a list, and losing your place
+    /// each time would defeat it.
+    pub fn toggle_hide_done(&mut self) {
+        let was = self.selectables().get(self.cursor).copied();
+        self.hide_done = !self.hide_done;
+        self.cursor = was
+            .and_then(|s| self.selectables().iter().position(|o| *o == s))
+            .unwrap_or_else(|| self.cursor.min(self.target_count().saturating_sub(1)));
+        self.visual = None;
+        self.status = Some(if self.hide_done {
+            "showing what's left".into()
+        } else {
+            "showing everything".into()
+        });
+    }
+
     pub fn toggle(&mut self) {
         let Some((gi, ii)) = self.at(self.cursor) else {
             return;
@@ -206,6 +232,10 @@ impl ItemList {
                 self.push_jira(gi, ii, Op::Done { key, local_id, done: want, was: !want });
             }
         }
+        // With done items hidden, ticking one takes its row away — the cursor
+        // then means the item that moved up into its place, which is the one
+        // you want next. It just has to stay in range.
+        self.clamp();
     }
 
     pub fn edit_item(&mut self, mode: EditMode) {
@@ -631,6 +661,9 @@ impl ItemList {
             (KeyCode::Char('J'), _) => self.move_group(1),
             (KeyCode::Char('K'), _) => self.move_group(-1),
 
+            (KeyCode::Char('/'), false) => return ListAction::Search,
+            (KeyCode::Char('h'), false) => self.toggle_hide_done(),
+
             (KeyCode::Char(' '), _) => self.toggle(),
             (KeyCode::Char('r'), false) => return ListAction::Reload,
             (KeyCode::Char('i'), false) | (KeyCode::Char('A'), _) => {
@@ -667,6 +700,58 @@ impl ItemList {
         ListAction::None
     }
 
+    // ----------------------------------------------------------- search ---
+
+    /// One line per cursor position, in display order, for the picker.
+    ///
+    /// Built from the same `selectables()` the cursor walks, so an index into
+    /// this is an index into that by construction — there is no second
+    /// ordering to keep in step.
+    ///
+    /// The ticket key goes in the line rather than in a heading, so fzf's
+    /// space-separated AND does the work a grouped list would otherwise need
+    /// special handling for: `jroz-2 cache` means what you'd expect.
+    pub fn search_lines(&self) -> Vec<String> {
+        let sels = self.selectables();
+        let label = |gi: usize| -> String {
+            match &self.groups[gi].key {
+                Some(k) => k.clone(),
+                None => "todo.md".to_string(),
+            }
+        };
+        let width = sels
+            .iter()
+            .map(|s| label(s.group()).chars().count())
+            .max()
+            .unwrap_or(0);
+        sels.iter()
+            .map(|s| match s {
+                Sel::Item(gi, ii) => {
+                    let it = &self.groups[*gi].items[*ii];
+                    format!(
+                        "{:width$}  {} {}{}",
+                        label(*gi),
+                        if it.done { '☑' } else { '☐' },
+                        "  ".repeat(it.depth),
+                        it.text
+                    )
+                }
+                Sel::EmptyGroup(gi) => {
+                    format!("{:width$}  · nothing yet", label(*gi))
+                }
+            })
+            .collect()
+    }
+
+    /// Put the cursor on the nth position. Out of range is ignored rather
+    /// than clamped: a picker that returned nonsense should move nothing.
+    pub fn search_pick(&mut self, nth: usize) {
+        if nth < self.target_count() {
+            self.cursor = nth;
+            self.visual = None;
+        }
+    }
+
     // ------------------------------------------------------------- draw ---
 
     /// Describe the in-progress edit to the renderer, so the buffer is drawn
@@ -700,7 +785,7 @@ impl ItemList {
 
     pub fn draw(&mut self, f: &mut Frame, area: Rect) {
         let view_h = area.height;
-        let rows = render::rows(&self.groups, self.editing_for_render());
+        let rows = render::rows(&self.groups, self.editing_for_render(), self.hide_done);
         let mut lines: Vec<Line> = rows.iter().map(|r| r.line.clone()).collect();
 
         // While editing, the caret is the highlight; while picking, the
@@ -762,11 +847,31 @@ impl ItemList {
         } else if self.visual() {
             " ── VISUAL ── j/k extend · > indent · < outdent · esc cancel"
         } else {
-            " j/k move · space done · i edit · o new · >>/<< indent · V select · dd delete · p promote · ⏎ open · q quit"
+            // The state marker leads: this footer is longer than a floating
+            // pane is wide, and the tail is the first thing to go.
+            return self.keymap_hint();
+        };
+        let base = base.to_string();
+        match self.in_flight {
+            0 => base,
+            n => format!("{base}  ·  {n} syncing…"),
+        }
+    }
+
+    /// The ordinary keymap line. The state marker leads when done items are
+    /// hidden, because this footer is longer than a floating pane is wide and
+    /// the tail is the first thing to go.
+    fn keymap_hint(&self) -> String {
+        let line = if self.hide_done {
+            " ── open only ── h all · j/k move · space done · i edit · o new · / find \
+· >>/<< indent · V select · dd delete · p promote · ⏎ open · q quit"
+        } else {
+            " j/k move · space done · i edit · o new · / find · h hide done \
+· >>/<< indent · V select · dd delete · p promote · ⏎ open · q quit"
         };
         match self.in_flight {
-            0 => base.to_string(),
-            n => format!("{base}  ·  {n} syncing…"),
+            0 => line.to_string(),
+            n => format!("{line}  ·  {n} syncing…"),
         }
     }
 
@@ -1337,7 +1442,7 @@ mod render_tests {
             key: Some("JROZ-9".into()),
             items: vec![],
         });
-        let rows = render::rows(&l.groups, render::Editing::None);
+        let rows = render::rows(&l.groups, render::Editing::None, false);
         let painted: Vec<_> = rows.iter().filter_map(|r| r.sel).collect();
         assert_eq!(painted, l.selectables());
         assert_eq!(painted.len(), l.target_count());
@@ -1459,5 +1564,337 @@ mod render_tests {
         assert!(screen.iter().any(|r| r.contains("no ticket")));
         assert!(screen.iter().any(|r| r.contains("JROZ-1")));
         assert!(screen.iter().filter(|r| r.contains('☐')).count() == 3);
+    }
+}
+
+/// The `/` handover. The picker itself is tested in `pick.rs`; what matters
+/// here is that the lines it's given and the positions the cursor can occupy
+/// are the *same sequence* — an index from one has to mean the same thing in
+/// the other, or `⏎` in fzf lands you on the wrong todo.
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use crate::todo::model::TodoItem;
+
+    fn item(text: &str, done: bool, depth: usize) -> TodoItem {
+        TodoItem {
+            text: text.into(),
+            done,
+            origin: Origin::Local { line: 0 },
+            dirty: false,
+            depth,
+        }
+    }
+
+    fn list() -> ItemList {
+        let mut l = ItemList::new(None);
+        l.groups = vec![
+            TodoGroup {
+                title: "no ticket".into(),
+                key: None,
+                items: vec![item("buy milk", false, 0)],
+            },
+            TodoGroup {
+                title: "Get FraudGen ready".into(),
+                key: Some("JROZ-2".into()),
+                items: vec![
+                    item("wire up retry", false, 0),
+                    item("the nested one", true, 1),
+                ],
+            },
+            // a ticket with nothing on it yet
+            TodoGroup {
+                title: "Later".into(),
+                key: Some("JROZ-10".into()),
+                items: vec![],
+            },
+        ];
+        l
+    }
+
+    #[test]
+    fn there_is_exactly_one_line_per_cursor_position() {
+        let l = list();
+        assert_eq!(l.search_lines().len(), l.target_count());
+        assert_eq!(l.search_lines().len(), 4, "3 items + the empty ticket");
+    }
+
+    /// The property the whole feature rests on.
+    #[test]
+    fn line_n_is_the_item_the_cursor_reaches_at_n() {
+        let mut l = list();
+        for (n, line) in l.search_lines().iter().enumerate() {
+            l.search_pick(n);
+            assert_eq!(l.cursor, n);
+            match l.at(n) {
+                Some((gi, ii)) => assert!(
+                    line.contains(&l.groups[gi].items[ii].text),
+                    "line {n} ({line:?}) is not the item the cursor landed on"
+                ),
+                None => assert!(
+                    line.contains("nothing yet"),
+                    "line {n} ({line:?}) should be the empty ticket"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn each_line_carries_its_ticket_so_fzf_can_and_the_terms() {
+        let l = list();
+        let lines = l.search_lines();
+        // `jroz-2 retry` in fzf is two AND-ed terms; both have to be present
+        assert!(lines[1].contains("JROZ-2") && lines[1].contains("wire up retry"));
+        // local items are searchable by where they live too
+        assert!(lines[0].contains("todo.md") && lines[0].contains("buy milk"));
+    }
+
+    #[test]
+    fn state_and_nesting_are_visible_in_the_picker() {
+        let lines = list().search_lines();
+        assert!(lines[1].contains('☐'), "open: {:?}", lines[1]);
+        assert!(lines[2].contains('☑'), "done: {:?}", lines[2]);
+        assert!(
+            lines[2].contains("  the nested one"),
+            "depth 1 indents: {:?}",
+            lines[2]
+        );
+    }
+
+    /// An empty ticket is a cursor position, so it must be reachable from the
+    /// picker as well — jumping there and pressing `o` is the point of it.
+    #[test]
+    fn a_ticket_with_no_items_can_still_be_jumped_to() {
+        let mut l = list();
+        let lines = l.search_lines();
+        assert!(lines[3].contains("JROZ-10"), "got {:?}", lines[3]);
+        l.search_pick(3);
+        assert_eq!(l.group_at_cursor(), Some(2));
+        assert_eq!(l.at(3), None, "it's a group, not an item");
+    }
+
+    #[test]
+    fn a_nonsense_index_moves_nothing() {
+        let mut l = list();
+        l.search_pick(2);
+        l.search_pick(99);
+        assert_eq!(l.cursor, 2);
+    }
+
+    /// A pick out of a visual selection would leave the selection stretched
+    /// across wherever you jumped from, which is never what you meant.
+    #[test]
+    fn jumping_drops_a_visual_selection() {
+        let mut l = list();
+        l.key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::NONE), 14);
+        assert!(l.visual());
+        l.search_pick(2);
+        assert!(!l.visual());
+    }
+
+    #[test]
+    fn slash_asks_for_the_picker_and_the_footer_says_so() {
+        let mut l = list();
+        let act = l.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE), 14);
+        assert_eq!(act, ListAction::Search);
+        assert!(l.hint().contains("/ find"), "got {:?}", l.hint());
+    }
+}
+
+/// `h` — show only what's left. A view setting, so the same rule as the
+/// picker applies: what's drawn and what the cursor can address are one
+/// sequence, and neither backend hears about it.
+#[cfg(test)]
+mod hide_done_tests {
+    use super::*;
+    use crate::todo::model::TodoItem;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn item(text: &str, done: bool, depth: usize) -> TodoItem {
+        TodoItem {
+            text: text.into(),
+            done,
+            origin: Origin::Local { line: 0 },
+            dirty: false,
+            depth,
+        }
+    }
+
+    fn list() -> ItemList {
+        let mut l = ItemList::new(None);
+        l.groups = vec![
+            TodoGroup {
+                title: "no ticket".into(),
+                key: None,
+                items: vec![
+                    item("buy milk", false, 0),
+                    item("call the vet", true, 0),
+                    item("walk the dog", false, 0),
+                ],
+            },
+            TodoGroup {
+                title: "all finished".into(),
+                key: Some("JROZ-9".into()),
+                items: vec![item("shipped it", true, 0)],
+            },
+        ];
+        l
+    }
+
+    fn press(l: &mut ItemList, c: char) {
+        l.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), 14);
+    }
+
+    fn screen(l: &mut ItemList) -> String {
+        let mut term = Terminal::new(TestBackend::new(60, 16)).unwrap();
+        term.draw(|f| {
+            let area = f.area();
+            l.draw(f, area);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn h_hides_the_done_ones_and_h_again_brings_them_back() {
+        let mut l = list();
+        assert!(screen(&mut l).contains("call the vet"));
+
+        press(&mut l, 'h');
+        let s = screen(&mut l);
+        assert!(!s.contains("call the vet"), "the done one is gone:\n{s}");
+        assert!(s.contains("buy milk") && s.contains("walk the dog"));
+
+        press(&mut l, 'h');
+        assert!(screen(&mut l).contains("call the vet"));
+    }
+
+    #[test]
+    fn the_cursor_cannot_reach_what_is_hidden() {
+        let mut l = list();
+        assert_eq!(l.target_count(), 4);
+        press(&mut l, 'h');
+        assert_eq!(l.target_count(), 3, "2 open + the finished group's heading");
+        for n in 0..l.target_count() {
+            if let Some((gi, ii)) = l.at(n) {
+                assert!(!l.groups[gi].items[ii].done, "position {n} is a done item");
+            }
+        }
+    }
+
+    /// You press `h` in the middle of working down a list; losing your place
+    /// every time would defeat the point of it.
+    #[test]
+    fn your_place_is_kept_across_the_toggle() {
+        let mut l = list();
+        press(&mut l, 'j');
+        press(&mut l, 'j'); // "walk the dog", past the done one
+        assert_eq!(l.at(l.cursor).map(|(g, i)| l.groups[g].items[i].text.clone()),
+                   Some("walk the dog".into()));
+        press(&mut l, 'h');
+        assert_eq!(l.at(l.cursor).map(|(g, i)| l.groups[g].items[i].text.clone()),
+                   Some("walk the dog".into()));
+        press(&mut l, 'h');
+        assert_eq!(l.at(l.cursor).map(|(g, i)| l.groups[g].items[i].text.clone()),
+                   Some("walk the dog".into()));
+    }
+
+    /// Standing on a done item when it's hidden — there is nowhere to keep
+    /// your place, so the cursor just has to stay somewhere real.
+    #[test]
+    fn hiding_the_item_you_are_standing_on_leaves_the_cursor_valid() {
+        let mut l = list();
+        press(&mut l, 'j'); // "call the vet", which is done
+        press(&mut l, 'h');
+        assert!(l.cursor < l.target_count());
+        if let Some((gi, ii)) = l.at(l.cursor) {
+            assert!(!l.groups[gi].items[ii].done);
+        }
+    }
+
+    /// A group can go empty without being empty, and saying "nothing yet"
+    /// there would be a lie — the work is done, not missing.
+    #[test]
+    fn a_fully_finished_ticket_says_so_and_stays_reachable() {
+        let mut l = list();
+        press(&mut l, 'h');
+        let s = screen(&mut l);
+        assert!(s.contains("JROZ-9"), "the ticket is still listed:\n{s}");
+        assert!(s.contains("all done"), "and says why it's empty:\n{s}");
+        assert!(!s.contains("nothing yet"), "which is a different thing:\n{s}");
+
+        // still a cursor position, so `o` can add to it
+        l.cursor = l.target_count() - 1;
+        assert_eq!(l.group_at_cursor(), Some(1));
+    }
+
+    /// Ticking a parent isn't a claim about the work nested under it.
+    #[test]
+    fn a_done_parent_with_unfinished_children_stays_visible() {
+        let mut l = list();
+        l.groups = vec![TodoGroup {
+            title: "no ticket".into(),
+            key: None,
+            items: vec![
+                item("the epic", true, 0),
+                item("still to do", false, 1),
+                item("finished bit", true, 1),
+                item("unrelated, done", true, 0),
+            ],
+        }];
+        press(&mut l, 'h');
+        let s = screen(&mut l);
+        assert!(s.contains("the epic"), "the parent stays:\n{s}");
+        assert!(s.contains("still to do"));
+        assert!(!s.contains("finished bit"), "its done child goes:\n{s}");
+        assert!(!s.contains("unrelated, done"), "and so does a done leaf:\n{s}");
+    }
+
+    /// The picker shows what the list shows — jumping to an invisible item
+    /// would be a way to end up somewhere the cursor can't be.
+    #[test]
+    fn the_fzf_lines_follow_the_toggle() {
+        let mut l = list();
+        assert_eq!(l.search_lines().len(), 4);
+        press(&mut l, 'h');
+        let lines = l.search_lines();
+        assert_eq!(lines.len(), l.target_count());
+        assert!(!lines.iter().any(|s| s.contains("call the vet")));
+    }
+
+    /// Ticking the last open item makes its row vanish under `h`. The cursor
+    /// has to land somewhere real, not one past the end.
+    #[test]
+    fn ticking_the_last_open_item_does_not_strand_the_cursor() {
+        let path = std::env::temp_dir().join(format!("tk-hide-{}.md", std::process::id()));
+        std::fs::write(&path, "- [ ] buy milk\n- [x] call the vet\n- [ ] walk the dog\n").unwrap();
+        let mut l = ItemList::new(Some(LocalFile::load_from(path.clone()).unwrap()));
+        l.groups = vec![l.local.as_ref().unwrap().group()];
+
+        press(&mut l, 'h');
+        l.cursor = l.target_count() - 1; // the last item still showing
+        press(&mut l, ' ');
+
+        assert!(l.cursor < l.target_count().max(1), "cursor {} of {}", l.cursor, l.target_count());
+        assert!(!screen(&mut l).contains("walk the dog"), "it ticked and went");
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn the_footer_says_which_way_h_points() {
+        let mut l = list();
+        assert!(l.hint().contains("h hide done"), "got {:?}", l.hint());
+        press(&mut l, 'h');
+        assert!(l.hint().contains("open only"), "got {:?}", l.hint());
+        assert!(l.hint().contains("h all"), "got {:?}", l.hint());
     }
 }

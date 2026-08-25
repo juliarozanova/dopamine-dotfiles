@@ -59,6 +59,33 @@ pub enum Editing<'a> {
     },
 }
 
+/// Which items survive `hide_done`, per group, in display order.
+///
+/// Resolved once and used by both `rows` and `selectables`, so the cursor can
+/// never address something the view isn't showing.
+///
+/// A **done parent with unfinished children stays**: hiding it would strand
+/// its sub-items under nothing, indented into thin air. Ticking the parent is
+/// not the same claim as finishing the work under it.
+pub fn shown(g: &TodoGroup, hide_done: bool) -> Vec<usize> {
+    if !hide_done {
+        return (0..g.items.len()).collect();
+    }
+    (0..g.items.len())
+        .filter(|&i| !g.items[i].done || has_open_child(g, i))
+        .collect()
+}
+
+/// Any unfinished item nested under `i` — the run of following items deeper
+/// than it, which is how both backends express nesting.
+fn has_open_child(g: &TodoGroup, i: usize) -> bool {
+    let depth = g.items[i].depth;
+    g.items[i + 1..]
+        .iter()
+        .take_while(|it| it.depth > depth)
+        .any(|it| !it.done)
+}
+
 fn dim() -> Style {
     Style::default().fg(theme().dim)
 }
@@ -73,7 +100,7 @@ fn gutter(dirty: bool) -> Span<'static> {
     }
 }
 
-pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
+pub fn rows(groups: &[TodoGroup], editing: Editing, hide_done: bool) -> Vec<Row> {
     let mut out = Vec::new();
     let plain = |l: Line<'static>| Row {
         line: l,
@@ -115,13 +142,20 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
         out.push(plain(Line::from(head)));
 
         let adding = matches!(editing, Editing::New { gi: g2, .. } if g2 == gi);
+        let shown = shown(g, hide_done);
 
-        if g.items.is_empty() && !adding {
-            // selectable, so `o` can reach a ticket with no checkboxes yet
+        if shown.is_empty() && !adding {
+            // Still a cursor position, so `o` can reach a ticket that has no
+            // checkboxes — or none left to show.
+            let note = if g.items.is_empty() {
+                "(nothing yet — o to add)"
+            } else {
+                "(all done ✨)"
+            };
             out.push(Row {
                 line: Line::from(vec![
                     Span::raw("   "),
-                    Span::styled("(nothing yet — o to add)".to_string(), dim()),
+                    Span::styled(note.to_string(), dim()),
                 ]),
                 sel: Some(Sel::EmptyGroup(gi)),
                 editing: false,
@@ -129,7 +163,7 @@ pub fn rows(groups: &[TodoGroup], editing: Editing) -> Vec<Row> {
             continue;
         }
 
-        for (ii, it) in g.items.iter().enumerate() {
+        for (ii, it) in shown.iter().map(|&i| (i, &g.items[i])) {
             // an item being reworded shows its buffer in its own place
             if let Editing::Existing { gi: g2, ii: i2, text, cursor, insert } = editing {
                 if g2 == gi && i2 == ii {
@@ -191,15 +225,16 @@ pub fn row_of(rows: &[Row], nth: usize) -> Option<usize> {
 
 /// Every position the cursor can occupy, in display order. `ItemList` builds
 /// the same sequence from the groups; a test holds the two in step.
-pub fn selectables(groups: &[TodoGroup]) -> Vec<Sel> {
+pub fn selectables(groups: &[TodoGroup], hide_done: bool) -> Vec<Sel> {
     groups
         .iter()
         .enumerate()
         .flat_map(|(gi, g)| {
-            if g.items.is_empty() {
+            let shown = shown(g, hide_done);
+            if shown.is_empty() {
                 vec![Sel::EmptyGroup(gi)]
             } else {
-                (0..g.items.len()).map(|ii| Sel::Item(gi, ii)).collect()
+                shown.into_iter().map(|ii| Sel::Item(gi, ii)).collect()
             }
         })
         .collect()
@@ -242,7 +277,7 @@ pub fn editing_row(rows: &[Row]) -> Option<usize> {
 }
 
 pub fn plain_dump(groups: &[TodoGroup]) -> Vec<String> {
-    rows(groups, Editing::None)
+    rows(groups, Editing::None, false)
         .iter()
         .map(|r| crate::ui::line_text(&r.line).trim_end().to_string())
         .collect()
@@ -280,7 +315,7 @@ mod tests {
 
     #[test]
     fn only_item_rows_are_selectable() {
-        let rs = rows(&groups(), Editing::None);
+        let rs = rows(&groups(), Editing::None, false);
         let selectable: Vec<_> = rs.iter().filter_map(|r| r.sel).collect();
         assert_eq!(
             selectable,
@@ -290,7 +325,7 @@ mod tests {
 
     #[test]
     fn row_of_walks_items_not_rows() {
-        let rs = rows(&groups(), Editing::None);
+        let rs = rows(&groups(), Editing::None, false);
         // the third item is the ticked one in the second group
         let r = row_of(&rs, 2).unwrap();
         assert_eq!(rs[r].sel, Some(Sel::Item(1, 1)));
@@ -298,7 +333,7 @@ mod tests {
 
     #[test]
     fn done_items_are_ticked_struck_and_quiet() {
-        let rs = rows(&groups(), Editing::None);
+        let rs = rows(&groups(), Editing::None, false);
         let done = &rs[row_of(&rs, 2).unwrap()].line;
         let glyph = &done.spans[2];
         assert_eq!(glyph.content, "☑");
@@ -312,7 +347,7 @@ mod tests {
     fn the_dirty_gutter_does_not_shift_the_text() {
         let mut gs = groups();
         gs[0].items[0].dirty = true;
-        let rs = rows(&gs, Editing::None);
+        let rs = rows(&gs, Editing::None, false);
         let dirty = &rs[row_of(&rs, 0).unwrap()].line;
         assert_eq!(dirty.spans[0].content, "·");
         assert_eq!(dirty.spans[0].content.chars().count(), 1);
@@ -323,7 +358,7 @@ mod tests {
     /// through, so only the selected row (painted at draw time) may set one.
     #[test]
     fn nothing_in_the_list_paints_a_background() {
-        for (i, r) in rows(&groups(), Editing::None).iter().enumerate() {
+        for (i, r) in rows(&groups(), Editing::None, false).iter().enumerate() {
             assert_eq!(r.line.style.bg, None, "row {i} paints a background");
             for s in &r.line.spans {
                 assert_eq!(s.style.bg, None, "a span on row {i} paints a background");

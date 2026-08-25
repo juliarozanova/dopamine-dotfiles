@@ -87,6 +87,21 @@
     steps back to the global list. `q` closes the pane from anywhere — those
     two meanings used to share one key.
 
+15. ~~`/` did nothing~~ — not a bug in `/`. `~/.local/bin/tk-tui` was two days
+    old: `cargo build` writes to `target/`, and only `chezmoi apply` runs the
+    `cargo install` that puts it on PATH. A stale binary is indistinguishable
+    from a broken feature, so `tk doctor` now compares the installed binary
+    against the chezmoi source and says `✗ tk-tui is older than its source`.
+
+14. `/` hands the checklist to fzf and jumps to what you pick, instead of the
+    hand-rolled subsequence matcher that preceded it. fzf's engine, fzf's
+    query language, and the same `ctrl-j/k` binds as tk's other pickers —
+    ~180 lines of matching code deleted rather than written. The lines fzf
+    gets are built from the same `selectables()` the cursor walks, so an index
+    means the same thing on both sides; that is what a test pins. `h` toggles
+    to open-only on the same principle: a view setting, invisible to both
+    backends, with the picker following it so you can't jump to a hidden item.
+
 13. Indented todos — items carry a depth, rendered as indentation, with
     `>>`/`<<` to indent and outdent, and `V` for a visual-line selection that
     `j`/`k` drag and a single `>` shifts wholesale — vim's own split, where an

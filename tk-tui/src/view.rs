@@ -17,6 +17,9 @@ pub enum Action {
     Push(Box<View>),
     Pop,
     Quit,
+    /// The view wants the fzf picker. It travels to the event loop because
+    /// that's what owns the terminal that has to be handed over.
+    Search,
 }
 
 /// Views are big and hold terminals' worth of state; naming the variant is all
@@ -28,6 +31,7 @@ impl std::fmt::Debug for Action {
             Action::Push(_) => "Push(..)",
             Action::Pop => "Pop",
             Action::Quit => "Quit",
+            Action::Search => "Search",
         })
     }
 }
@@ -79,6 +83,34 @@ impl View {
         }
     }
 
+    /// The checklist this view is showing, if it's showing one. Both views
+    /// search through the same widget — the aggregate list, or the one ticket's
+    /// — so neither needs its own idea of what searching means.
+    fn list(&mut self) -> Option<&mut crate::todo::list::ItemList> {
+        match self {
+            View::Todo(v) => Some(&mut v.list),
+            View::Ticket(a) if a.focus == crate::app::Focus::Todo => Some(&mut a.todo),
+            View::Ticket(_) => None,
+        }
+    }
+
+    pub fn search_lines(&mut self) -> Vec<String> {
+        self.list().map(|l| l.search_lines()).unwrap_or_default()
+    }
+
+    pub fn search_pick(&mut self, nth: usize) {
+        if let Some(l) = self.list() {
+            l.search_pick(nth);
+        }
+    }
+
+    /// Say why the picker didn't run, where the user is looking.
+    pub fn search_failed(&mut self, why: String) {
+        if let Some(l) = self.list() {
+            l.status = Some(why);
+        }
+    }
+
     pub fn key(&mut self, k: KeyEvent, view_h: u16) -> Result<Action> {
         Ok(match self {
             View::Todo(v) => match v.key(k, view_h) {
@@ -90,6 +122,7 @@ impl View {
                         Action::None
                     }
                 },
+                ListAction::Search => Action::Search,
                 ListAction::Reload | ListAction::None => Action::None,
             },
             View::Ticket(a) => a.key(k, view_h),

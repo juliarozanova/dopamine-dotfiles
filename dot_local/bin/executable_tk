@@ -252,6 +252,21 @@ cmd_doctor() {
   done
   [[ -f "$TPL" ]] && printf '  ✓ layout template\n' || { printf '  ✗ layout template (%s)\n' "$TPL"; ok=0; }
 
+  # Is the installed tk-tui actually built from the source you have?
+  # `cargo build` writes to target/, not to ~/.local/bin — only `chezmoi apply`
+  # installs it. A binary quietly two days behind the source looks exactly like
+  # a feature that doesn't work, which is a bad afternoon.
+  local bin src
+  bin="$(command -v tk-tui 2>/dev/null || true)"
+  src="$(chezmoi source-path 2>/dev/null || true)/tk-tui/src"
+  if [[ -n "$bin" && -d "$src" ]]; then
+    if [[ -n "$(find "$src" -name '*.rs' -newer "$bin" -print -quit 2>/dev/null)" ]]; then
+      printf '  ✗ tk-tui is older than its source — run: chezmoi apply\n'; ok=0
+    else
+      printf '  ✓ tk-tui up to date\n'
+    fi
+  fi
+
   # Live Jira auth check. `jira me` only echoes cached config, so it can't tell
   # you the token is dead — hit /myself directly and read the HTTP status.
   local conf="$HOME/.config/.jira/.config.yml" server login code

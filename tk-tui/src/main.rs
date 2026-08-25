@@ -10,6 +10,7 @@ mod adf;
 mod app;
 mod editor;
 mod jira;
+mod pick;
 mod rest;
 mod theme;
 mod todo;
@@ -118,6 +119,17 @@ fn run(terminal: &mut DefaultTerminal, first: View) -> Result<()> {
                 }
             }
             Action::Quit => return Ok(()),
+            // The picker takes the whole terminal, so it happens here rather
+            // than inside the view. A failure to start it is a message, not
+            // the end of the session.
+            Action::Search => {
+                let lines = top.search_lines();
+                match pick::pick(terminal, "todo", &lines) {
+                    Ok(Some(n)) => top.search_pick(n),
+                    Ok(None) => {}
+                    Err(e) => top.search_failed(format!("{e:#}")),
+                }
+            }
         }
     }
 }
